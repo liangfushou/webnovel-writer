@@ -11,7 +11,7 @@
 - `.webnovel/state.json`（运行时状态）
 - `设定集/`（世界观、力量体系、主角卡、金手指设计、反派设计等）
 - `设定集/技能卡/`、`设定集/物品库/`、`设定集/技能物品时间线.md`
-- `大纲/总纲.md`、`大纲/爽点规划.md`
+- `大纲/总纲.md`、`大纲/爽点规划.md`、`大纲/剧情时间轴.md`
 - `规划/写作流程.md`、`规划/No正文生成提示词.md`
 - `.webnovel/post_chapter_update_checklist.md`
 - `.codex/skills/no-webnovel-write/SKILL.md`

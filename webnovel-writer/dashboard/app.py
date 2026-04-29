@@ -361,6 +361,7 @@ def _build_workflow_status(project_root: Path) -> dict:
         _read_workflow_doc(project_root, "规划/写作流程.md", "写作流程"),
         _read_workflow_doc(project_root, "规划/No正文生成提示词.md", "No 正文提示词"),
         _read_workflow_doc(project_root, ".webnovel/post_chapter_update_checklist.md", "写后状态更新清单"),
+        _read_workflow_doc(project_root, "大纲/剧情时间轴.md", "剧情时间轴"),
         _read_workflow_doc(project_root, "设定集/技能物品时间线.md", "技能物品时间线"),
         _read_workflow_doc(project_root, "设定集/技能卡/技能卡总表.md", "技能卡总表"),
         _read_workflow_doc(project_root, "设定集/物品库/物品卡总表.md", "物品卡总表"),

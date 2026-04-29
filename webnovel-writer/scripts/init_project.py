@@ -223,6 +223,7 @@ def _build_writing_workflow_doc(title: str, genre: str, now: str) -> str:
             "- `设定集/角色库/`",
             "- `设定集/技能卡/`",
             "- `设定集/物品库/`",
+            "- `大纲/剧情时间轴.md`",
             "- `设定集/技能物品时间线.md`",
             "- `大纲/总纲.md`",
             "- `大纲/爽点规划.md`",
@@ -238,6 +239,7 @@ def _build_writing_workflow_doc(title: str, genre: str, now: str) -> str:
             "- 当前卷详细大纲",
             "- 当前卷时间线",
             "- 当前卷节拍表",
+            "- 全书剧情时间轴",
             "- 前期爽点或试水节奏方案",
             "- 中后期技能/物品允许方向",
             "",
@@ -267,6 +269,7 @@ def _build_writing_workflow_doc(title: str, genre: str, now: str) -> str:
             "- `设定集/OOC禁区.md`",
             "- `设定集/平台风格约束.md`",
             "- 当前卷详细大纲、时间线、节拍表",
+            "- `大纲/剧情时间轴.md`",
             "- `大纲/爽点规划.md`",
             "- `设定集/角色库/`",
             "- `设定集/技能卡/`",
@@ -305,6 +308,7 @@ def _build_writing_workflow_doc(title: str, genre: str, now: str) -> str:
             "- character_state",
             "- relationship_events",
             "- timeline_events",
+            "- `大纲/剧情时间轴.md`",
             "- foreshadows",
             "- 技能卡：获得、暴露、强化、限制、反噬、冷却、伤势影响",
             "- 物品卡：持有人、位置、损坏、消耗、转移、遗失",
@@ -344,16 +348,17 @@ def _build_no_prompt_doc(title: str, genre: str, now: str) -> str:
             "5. 当前卷详细大纲",
             "6. 当前卷时间线",
             "7. 当前卷节拍表",
-            "8. `大纲/爽点规划.md`",
-            "9. `设定集/角色库/`",
-            "10. `设定集/主角卡.md`",
-            "11. `设定集/金手指设计.md`",
-            "12. `设定集/改写边界.md`",
-            "13. `设定集/技能卡/`",
-            "14. `设定集/物品库/`",
-            "15. `设定集/技能物品时间线.md`",
-            "16. 同人/衍生项目额外读取：`设定集/原作时间线.md`",
-            "17. 同人/衍生项目额外读取：`设定集/同人分歧点.md`",
+            "8. `大纲/剧情时间轴.md`",
+            "9. `大纲/爽点规划.md`",
+            "10. `设定集/角色库/`",
+            "11. `设定集/主角卡.md`",
+            "12. `设定集/金手指设计.md`",
+            "13. `设定集/改写边界.md`",
+            "14. `设定集/技能卡/`",
+            "15. `设定集/物品库/`",
+            "16. `设定集/技能物品时间线.md`",
+            "17. 同人/衍生项目额外读取：`设定集/原作时间线.md`",
+            "18. 同人/衍生项目额外读取：`设定集/同人分歧点.md`",
             "",
             "## 正文要求",
             "",
@@ -370,6 +375,7 @@ def _build_no_prompt_doc(title: str, genre: str, now: str) -> str:
             "- 正文中的技能、血脉、法器、忍具、系统能力等，只能按当前技能卡状态使用。",
             "- 物品不能凭空出现、消失、换手、损坏或升级；出现变化必须能落到物品卡。",
             "- 角色受伤、立场、信任、敌意、同行/分离变化，必须能落到角色卡或提交事件。",
+            "- 时间锚点、地点、事件结果、下一章压力，必须能落到 `大纲/剧情时间轴.md`。",
             "- 原作事件被提前、延后、保留或改写时，必须能落到原作时间线或同人分歧点。",
             "- 若本章造成技能、物品、人物关系、伤势、阵营、时间线变化，正式提交前必须执行 `.webnovel/post_chapter_update_checklist.md`。",
             "",
@@ -400,6 +406,7 @@ def _build_post_chapter_checklist(title: str, genre: str, now: str) -> str:
             "- `设定集/物品库/`",
             "- `设定集/技能物品时间线.md`",
             "- `.webnovel/state.json`",
+            "- `大纲/剧情时间轴.md`",
             "- 最近 3 章正文和摘要",
             "- 同人/衍生项目额外读取：`设定集/原作时间线.md`、`设定集/同人分歧点.md`",
             "",
@@ -428,6 +435,7 @@ def _build_post_chapter_checklist(title: str, genre: str, now: str) -> str:
             "## 时间线与事件",
             "",
             "- [ ] 本章时间锚点、地点、战斗/事件结果已同步到时间线/事件索引。",
+            "- [ ] `大纲/剧情时间轴.md` 已追加本章事实记录。",
             "- [ ] 原作事件如果被提前、延后、改写、保留，已更新 `同人分歧点.md` 或相关大纲。",
             "- [ ] 若出现新势力、新任务线、新副本、新追杀线，已写入对应设定或伏笔记录。",
             "",
@@ -508,6 +516,49 @@ def _build_skill_item_timeline_doc(title: str, genre: str, now: str) -> str:
             "- 若能力升级，必须注明升级原因、代价和首次验证章节。",
             "- 若物品换手，必须注明交接场景和关系后果。",
             "- 中后期计划只能写“允许方向”，不能当成正文事实；写到对应章节后再把“计划态”改成“已发生”。",
+            "",
+        ]
+    )
+
+
+def _build_story_timeline_doc(title: str, genre: str, now: str) -> str:
+    return "\n".join(
+        [
+            "# 剧情时间轴",
+            "",
+            f"> 项目：{title}｜题材：{genre}｜创建：{now}",
+            "",
+            "## 用途",
+            "",
+            "这份文件是写后更新用的全书事件时间轴。卷级 `第N卷-时间线.md` 负责计划，本文件负责记录已经发生的正文事实。",
+            "",
+            "每章正式提交后，如果发生事件推进、地点变化、时间跳转、人物状态变化、技能/物品变化、伏笔埋收或原作分歧，都必须追加一条记录。",
+            "",
+            "## 记录字段",
+            "",
+            "- 章节：第几章。",
+            "- 时间锚点：故事内日期、时辰、任务日、末世第几天、考试第几场等。",
+            "- 地点：主场景或移动路线。",
+            "- 核心事件：本章发生了什么，必须是正文事实。",
+            "- 结果变化：赢了什么、失去了什么、身份/局势/关系怎么变。",
+            "- 人物状态：伤势、立场、同行/分离、情绪、信任/敌意。",
+            "- 技能/物品变化：引用 `设定集/技能物品时间线.md` 的对应条目。",
+            "- 伏笔变化：新埋、推进、回收、失效。",
+            "- 下一章压力：下一章必须承接的危机或问题。",
+            "",
+            "## 全书时间轴表",
+            "",
+            "| 章节 | 时间锚点 | 地点 | 核心事件 | 结果变化 | 人物状态 | 技能/物品变化 | 伏笔变化 | 下一章压力 |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+            "| （待填写） |  |  |  |  |  |  |  |  |",
+            "",
+            "## 更新规则",
+            "",
+            "- 只记录已经发生的正文事实，不把中后期计划写成既成事实。",
+            "- 时间锚点必须单调可追踪；若倒叙、梦境、回忆或双时间线，必须注明叙事时间和事件实际时间。",
+            "- 若章节改变原作节点、提前/延后事件或制造同人分歧，还要同步更新 `设定集/原作时间线.md` 或 `设定集/同人分歧点.md`。",
+            "- 若章节改变技能/物品状态，还要同步更新 `设定集/技能物品时间线.md`。",
+            "- 若时间线冲突，先修正文或合同，不要为了正文强行改时间轴。",
             "",
         ]
     )
@@ -759,6 +810,7 @@ def _build_codex_no_skill_doc(title: str, genre: str, now: str) -> str:
             "- skill cards, ownership, cooldown/limits, injuries, unlock state, and skill evolution",
             "- item cards, ownership, location, damage, consumption, transfer, loss, or unlock state",
             "- skill/item timeline if any skill or object appears, changes hands, changes state, or creates a future obligation",
+            "- story timeline if time anchor, location, event result, state change, or next-chapter pressure changes",
             "- if a new skill or item enters正文 from plan state, create or update its card before finalizing",
             "- outline/timeline/event logs if the chapter advances or changes planned events",
             "- foreshadowing ledger if a clue is planted, paid off, delayed, or invalidated",
@@ -1013,6 +1065,10 @@ def init_project(
     _write_text_if_missing(
         project_path / ".webnovel" / "post_chapter_update_checklist.md",
         _build_post_chapter_checklist(title, genre, now),
+    )
+    _write_text_if_missing(
+        project_path / "大纲" / "剧情时间轴.md",
+        _build_story_timeline_doc(title, genre, now),
     )
     _write_text_if_missing(
         project_path / "设定集" / "技能物品时间线.md",
@@ -1431,6 +1487,7 @@ __pycache__/
     print(" - 设定集/物品库/物品卡总表.md")
     print(" - 大纲/总纲.md")
     print(" - 大纲/爽点规划.md")
+    print(" - 大纲/剧情时间轴.md")
     print(" - 规划/写作流程.md")
     print(" - 规划/No正文生成提示词.md")
     print(" - .webnovel/post_chapter_update_checklist.md")
