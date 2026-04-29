@@ -53,6 +53,26 @@ def test_extract_chapter_outline_supports_hyphen_filename(tmp_path):
     assert "测试大纲" in outline
 
 
+def test_extract_chapter_outline_supports_double_hash_headings(tmp_path):
+    scripts_dir = Path(__file__).resolve().parents[2]
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+
+    from extract_chapter_context import extract_chapter_outline
+
+    outline_dir = tmp_path / "大纲"
+    outline_dir.mkdir(parents=True, exist_ok=True)
+    (outline_dir / "第1卷-详细大纲.md").write_text(
+        "# 第1卷\n\n## 第1章：桥上的白线\n目标：看见死劫。\n\n## 第2章：雷光之前\n目标：干预死劫。",
+        encoding="utf-8",
+    )
+
+    outline = extract_chapter_outline(tmp_path, 1)
+    assert "## 第1章：桥上的白线" in outline
+    assert "目标：看见死劫" in outline
+    assert "第2章" not in outline
+
+
 def test_extract_chapter_outline_prefers_state_volume_mapping(tmp_path):
     scripts_dir = Path(__file__).resolve().parents[2]
     if str(scripts_dir) not in sys.path:

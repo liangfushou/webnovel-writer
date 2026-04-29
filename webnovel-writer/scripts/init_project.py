@@ -199,6 +199,618 @@ def _build_master_outline(target_chapters: int, *, chapters_per_volume: int = 50
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _build_writing_workflow_doc(title: str, genre: str, now: str) -> str:
+    return "\n".join(
+        [
+            "# 写作流程",
+            "",
+            f"> 项目：{title}｜题材：{genre}｜创建：{now}",
+            "",
+            "## 目标",
+            "",
+            "这套流程把 `webnovel-writer` 的资料库、状态追踪、面板和 Novel-Control-Station/No 的正文质感接起来。",
+            "",
+            "- `webnovel-writer` 负责项目结构、角色/物品/技能卡、时间线、合同树、写后提交和面板展示。",
+            "- Novel-Control-Station/No 只负责正文质感和现场感，不自由改设定。",
+            "- `$anti-ai-rewrite` 只做终检和去模板腔，不替代写前合同和状态更新。",
+            "",
+            "## Init 阶段",
+            "",
+            "初始化必须生成：",
+            "",
+            "- `.webnovel/state.json`",
+            "- `.story-system/` 合同树目录",
+            "- `设定集/角色库/`",
+            "- `设定集/技能卡/`",
+            "- `设定集/物品库/`",
+            "- `设定集/技能物品时间线.md`",
+            "- `大纲/总纲.md`",
+            "- `大纲/爽点规划.md`",
+            "- `规划/写作流程.md`",
+            "- `规划/No正文生成提示词.md`",
+            "- `.webnovel/post_chapter_update_checklist.md`",
+            "- `.codex/skills/no-webnovel-write/SKILL.md`",
+            "",
+            "## Plan 阶段",
+            "",
+            "当前卷写作前必须具备：",
+            "",
+            "- 当前卷详细大纲",
+            "- 当前卷时间线",
+            "- 当前卷节拍表",
+            "- 前期爽点或试水节奏方案",
+            "- 中后期技能/物品允许方向",
+            "",
+            "## Chapter Contract 阶段",
+            "",
+            "每章写前生成当前章合同，合同缺失时不得直接写正文。",
+            "",
+            "合同至少包含：",
+            "",
+            "- 本章目标",
+            "- 本章爽点",
+            "- 出场人物",
+            "- 人物当前状态",
+            "- 可用技能/物品",
+            "- 必须保留",
+            "- 禁止写崩",
+            "- 章末钩子",
+            "",
+            "## No 正文阶段",
+            "",
+            "No/NCS 负责正文质感，但必须按合同和资料库写。",
+            "",
+            "写正文前必须核对：",
+            "",
+            "- `.story-system/MASTER_SETTING.json`",
+            "- 当前章合同",
+            "- `设定集/OOC禁区.md`",
+            "- `设定集/平台风格约束.md`",
+            "- 当前卷详细大纲、时间线、节拍表",
+            "- `大纲/爽点规划.md`",
+            "- `设定集/角色库/`",
+            "- `设定集/技能卡/`",
+            "- `设定集/物品库/`",
+            "- `设定集/技能物品时间线.md`",
+            "- 同人/衍生项目额外读取：`设定集/原作时间线.md`、`设定集/同人分歧点.md`",
+            "",
+            "## 正文口感约束",
+            "",
+            "- 先写现场，再让设定从现场里长出来。",
+            "- 少替读者总结主题，少用“这不是……而是……”解释句。",
+            "- 角色用动作、停顿、误判、选择体现状态，不用作者旁白替他说透。",
+            "- 规则、系统、技能不能变成说明书；每次规则出现都要带来风险、代价或选择。",
+            "- 每章至少有一个可感知爽点：救下、反杀、夺回、打脸、破局、身份推进、关系转折或新危机开门。",
+            "- 章末钩子必须从本章事件自然长出，不靠硬抛谜语。",
+            "",
+            "## Review 阶段",
+            "",
+            "正文定稿前检查：",
+            "",
+            "- 设定是否冲突",
+            "- 人物是否 OOC",
+            "- 战力/能力是否越级",
+            "- 爽点是否可感知",
+            "- AI 腔是否明显",
+            "- 技能/物品/时间线是否需要写后更新",
+            "",
+            "## Commit 阶段",
+            "",
+            "用户确认“正式”后，才进入写后提交流程。",
+            "",
+            "写后必须更新：",
+            "",
+            "- chapter summary",
+            "- index.db",
+            "- character_state",
+            "- relationship_events",
+            "- timeline_events",
+            "- foreshadows",
+            "- 技能卡：获得、暴露、强化、限制、反噬、冷却、伤势影响",
+            "- 物品卡：持有人、位置、损坏、消耗、转移、遗失",
+            "- `设定集/技能物品时间线.md`",
+            "- 同人/衍生项目：原作时间线、同人分歧点",
+            "- `.webnovel/state.json`",
+            "",
+            "写后必须执行：",
+            "",
+            "```text",
+            ".webnovel/post_chapter_update_checklist.md",
+            "```",
+            "",
+            "未通过时不得提交章节。",
+            "",
+        ]
+    )
+
+
+def _build_no_prompt_doc(title: str, genre: str, now: str) -> str:
+    return "\n".join(
+        [
+            "# No 正文生成提示词",
+            "",
+            f"> 项目：{title}｜题材：{genre}｜创建：{now}",
+            "",
+            "你只负责正文质感，不负责自由改动设定。",
+            "",
+            "## 必读",
+            "",
+            "请严格读取并遵守：",
+            "",
+            "1. `.story-system/MASTER_SETTING.json`",
+            "2. 当前章合同，例如 `.story-system/chapters/chapter_005_contract.json`",
+            "3. `设定集/OOC禁区.md`",
+            "4. `设定集/平台风格约束.md`",
+            "5. 当前卷详细大纲",
+            "6. 当前卷时间线",
+            "7. 当前卷节拍表",
+            "8. `大纲/爽点规划.md`",
+            "9. `设定集/角色库/`",
+            "10. `设定集/主角卡.md`",
+            "11. `设定集/金手指设计.md`",
+            "12. `设定集/改写边界.md`",
+            "13. `设定集/技能卡/`",
+            "14. `设定集/物品库/`",
+            "15. `设定集/技能物品时间线.md`",
+            "16. 同人/衍生项目额外读取：`设定集/原作时间线.md`",
+            "17. 同人/衍生项目额外读取：`设定集/同人分歧点.md`",
+            "",
+            "## 正文要求",
+            "",
+            "- 开局快，冲突明确，尽快把线索变成杀局、选择、反杀、身份推进或原作回流。",
+            "- 不写百科复述，不写设定说明书，不写系统面板流水账。",
+            "- 人物通过动作、对话、选择、沉默和误判体现状态。",
+            "- 少用作者式总结句，少把主题直接说出来。",
+            "- 少用过于整齐的句式：`不是……而是……`、`他明白一件事`、`这意味着……`。",
+            "- 每章末尾必须有钩子，但钩子必须来自本章事件。",
+            "- 主角不能无脑装逼，前期依靠信息差、代价交换、现场判断和布局。",
+            "",
+            "## 状态约束",
+            "",
+            "- 正文中的技能、血脉、法器、忍具、系统能力等，只能按当前技能卡状态使用。",
+            "- 物品不能凭空出现、消失、换手、损坏或升级；出现变化必须能落到物品卡。",
+            "- 角色受伤、立场、信任、敌意、同行/分离变化，必须能落到角色卡或提交事件。",
+            "- 原作事件被提前、延后、保留或改写时，必须能落到原作时间线或同人分歧点。",
+            "- 若本章造成技能、物品、人物关系、伤势、阵营、时间线变化，正式提交前必须执行 `.webnovel/post_chapter_update_checklist.md`。",
+            "",
+            "## 禁止",
+            "",
+            "- 不能为了爽点临时改技能、改道具、改时间线。",
+            "- 不能让人物替作者解释主题。",
+            "- 不能让配角只负责震惊、点头、复读设定。",
+            "- 不能把规则辩论写成条款清单，必须让规则压到人的身体、选择和损失上。",
+            "",
+        ]
+    )
+
+
+def _build_post_chapter_checklist(title: str, genre: str, now: str) -> str:
+    return "\n".join(
+        [
+            "# 写后状态更新清单",
+            "",
+            f"> 项目：{title}｜题材：{genre}｜创建：{now}",
+            "",
+            "每章正文定稿后执行。未完成前不得进入最终提交。",
+            "",
+            "## 必读源",
+            "",
+            "- `设定集/角色库/`",
+            "- `设定集/技能卡/`",
+            "- `设定集/物品库/`",
+            "- `设定集/技能物品时间线.md`",
+            "- `.webnovel/state.json`",
+            "- 最近 3 章正文和摘要",
+            "- 同人/衍生项目额外读取：`设定集/原作时间线.md`、`设定集/同人分歧点.md`",
+            "",
+            "## 角色状态",
+            "",
+            "- [ ] 出场人物当前状态已核对。",
+            "- [ ] 受伤、昏迷、消耗、情绪、立场变化已记录。",
+            "- [ ] 阵营、关系、敌意、信任、同行/分离状态已更新。",
+            "- [ ] 重要人物不得只在正文变化，角色卡/索引必须跟上。",
+            "",
+            "## 技能状态",
+            "",
+            "- [ ] 本章使用过的技能、血脉、法术、忍术、体术、刀术、金手指能力都已核对技能卡。",
+            "- [ ] 新解锁、强化、暴露、被识破、受限、反噬、冷却、代价已更新。",
+            "- [ ] 若出现新技能、组合技、阶段升级，必须先建卡或更新 `设定集/技能卡/技能卡总表.md`。",
+            "- [ ] 重要技能变化已追加到 `设定集/技能物品时间线.md`。",
+            "",
+            "## 物品状态",
+            "",
+            "- [ ] 武器、道具、凭证、符纸、卷轴、法器、情报物等出现即核对物品库。",
+            "- [ ] 物品位置、持有人、损坏、消耗、隐藏、转移、遗失已更新。",
+            "- [ ] 新物品或计划态物品进入正文，必须先建单卡或更新 `设定集/物品库/物品卡总表.md`。",
+            "- [ ] 重要物品变化已追加到 `设定集/技能物品时间线.md`。",
+            "- [ ] 若只是出场但无状态变化，也要在提交输出的 `no_update_needed` 写明原因。",
+            "",
+            "## 时间线与事件",
+            "",
+            "- [ ] 本章时间锚点、地点、战斗/事件结果已同步到时间线/事件索引。",
+            "- [ ] 原作事件如果被提前、延后、改写、保留，已更新 `同人分歧点.md` 或相关大纲。",
+            "- [ ] 若出现新势力、新任务线、新副本、新追杀线，已写入对应设定或伏笔记录。",
+            "",
+            "## 伏笔与债务",
+            "",
+            "- [ ] 新伏笔已记录：内容、种类、触发章、预计回收章。",
+            "- [ ] 已回收伏笔已标记回收。",
+            "- [ ] 因改写原作或改变事件结果产生的新剧情债已记录。",
+            "- [ ] 不能把伏笔只藏在正文里，不进索引。",
+            "",
+            "## 提交前输出",
+            "",
+            "```text",
+            "post_chapter_update_check: pass/fail",
+            "updated_files:",
+            "- 路径：更新原因",
+            "no_update_needed:",
+            "- 路径或类别：原因",
+            "conflicts:",
+            "- 无 / 冲突描述 + 处理方式",
+            "```",
+            "",
+        ]
+    )
+
+
+def _build_skill_item_timeline_doc(title: str, genre: str, now: str) -> str:
+    return "\n".join(
+        [
+            "# 技能物品时间线",
+            "",
+            f"> 项目：{title}｜题材：{genre}｜创建：{now}",
+            "",
+            "## 用途",
+            "",
+            "这份文件追踪技能、能力、武器、道具和关键物品的生命周期。正文写作、章节提交和资料库更新时，用它确认：",
+            "",
+            "- 技能是否已经暴露给某人。",
+            "- 技能是否已经升级、受限或反噬。",
+            "- 物品当前持有人是谁。",
+            "- 物品是否损坏、丢失、消耗、换手。",
+            "- 某个能力/物品能不能在当前章节使用。",
+            "",
+            "## 记录字段",
+            "",
+            "- 名称：技能或物品名。",
+            "- 类型：技能、血脉、法术、忍具、武器、法器、情报物、凭证等。",
+            "- 当前持有人：角色或势力。",
+            "- 当前状态：可用、受损、隐藏、暴露、失控、待回收。",
+            "- 首次出现：章节。",
+            "- 最近变化：章节和变化摘要。",
+            "- 下一节点：计划在哪个章节或卷发生变化。",
+            "- 禁区：当前阶段不能发生什么。",
+            "",
+            "## 生命周期表",
+            "",
+            "| 名称 | 类型 | 当前持有人 | 当前状态 | 首次出现 | 最近变化 | 下一节点 | 禁区 |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- |",
+            "| （待填写） |  |  |  |  |  |  |  |",
+            "",
+            "## 中后期卷级更新总账",
+            "",
+            "这张表只记录“计划态”和“允许方向”，不是已经发生的正文事实。正式连载到对应章节后，才把具体变化写进上面的生命周期表和对应技能卡/物品卡。",
+            "",
+            "| 阶段 | 章节范围 | 技能更新重点 | 物品更新重点 | 必须防止 |",
+            "| --- | --- | --- | --- | --- |",
+            "| 卷一 | 第1-50章 |  |  |  |",
+            "",
+            "## 专项总表",
+            "",
+            "- 人物技能中后期更新：`设定集/技能卡/中后期人物技能更新总表.md`",
+            "- 物品/道具中后期更新：`设定集/物品库/物品卡总表.md`",
+            "",
+            "## 更新规则",
+            "",
+            "- 每次正式 chapter-commit 后，如果技能或物品状态变化，必须同步更新本文件或通过资料库事件投影更新。",
+            "- 草稿阶段可以不更新，但一旦用户确认“正式”，需要把本章出现过的技能、物品状态写入提交事件。",
+            "- 若能力升级，必须注明升级原因、代价和首次验证章节。",
+            "- 若物品换手，必须注明交接场景和关系后果。",
+            "- 中后期计划只能写“允许方向”，不能当成正文事实；写到对应章节后再把“计划态”改成“已发生”。",
+            "",
+        ]
+    )
+
+
+def _build_skill_index_doc(title: str, genre: str, now: str) -> str:
+    return "\n".join(
+        [
+            "# 技能卡总表",
+            "",
+            f"> 项目：{title}｜题材：{genre}｜创建：{now}",
+            "",
+            "| 技能/能力 | 持有人 | 阶段 | 状态 | 首次出现 | 最近变化 | 单卡路径 |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+            "| （待填写） |  |  |  |  |  |  |",
+            "",
+            "## 使用规则",
+            "",
+            "- 正文使用任何新技能前，先建技能卡或登记到本表。",
+            "- 技能升级、暴露、被识破、冷却、反噬都必须更新。",
+            "- 单卡建议放在 `设定集/技能卡/{角色}-{技能名}.md`。",
+            "",
+        ]
+    )
+
+
+def _build_mid_late_skill_doc(title: str, genre: str, now: str) -> str:
+    return "\n".join(
+        [
+            "# 中后期人物技能更新总表",
+            "",
+            f"> 项目：{title}｜题材：{genre}｜创建：{now}",
+            "",
+            "这份表约束中后期人物技能成长，避免战力漂移、升级突兀、原作人物/核心配角被削弱。",
+            "",
+            "| 角色 | 当前阶段 | 允许成长方向 | 禁止提前获得 | 预计节点 |",
+            "| --- | --- | --- | --- | --- |",
+            "| （待填写） |  |  |  |  |",
+            "",
+            "## 更新规则",
+            "",
+            "- 角色技能状态变化后，要同步更新 `设定集/技能物品时间线.md`。",
+            "- 中后期计划不能当成当前正文事实使用。",
+            "",
+        ]
+    )
+
+
+def _build_item_index_doc(title: str, genre: str, now: str) -> str:
+    return "\n".join(
+        [
+            "# 物品卡总表",
+            "",
+            f"> 项目：{title}｜题材：{genre}｜创建：{now}",
+            "",
+            "| 物品 | 类型 | 当前持有人 | 当前状态 | 首次出现 | 最近变化 | 单卡路径 |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+            "| （待填写） |  |  |  |  |  |  |",
+            "",
+            "## 使用规则",
+            "",
+            "- 正文使用任何重要物品前，先建物品卡或登记到本表。",
+            "- 持有人、位置、损坏、消耗、隐藏、转移、遗失都必须更新。",
+            "- 单卡建议放在 `设定集/物品库/{物品名}.md`。",
+            "",
+        ]
+    )
+
+
+def _build_simple_policy_doc(title: str, genre: str, now: str, kind: str) -> str:
+    if kind == "ooc":
+        body = [
+            "# OOC禁区",
+            "",
+            "## 通用原则",
+            "",
+            "- 角色不能为了推进剧情突然降智。",
+            "- 角色不能突然替作者解释主题。",
+            "- 原作/既有角色的能力、性格、关系压力必须先核对资料库。",
+            "- 主角不能靠临时外挂无代价碾压。",
+            "",
+            "## 待补角色禁区",
+            "",
+            "| 角色 | 不能做什么 | 原因 |",
+            "| --- | --- | --- |",
+            "| （待填写） |  |  |",
+        ]
+    elif kind == "platform":
+        body = [
+            "# 平台风格约束",
+            "",
+            "## 通用节奏",
+            "",
+            "- 开局尽快给冲突、危机、选择或反杀。",
+            "- 前30章按试水节奏处理，线索不能长期只做谜语。",
+            "- 每章至少一个可感知爽点，每 3-5 章一次更强结果。",
+            "- 设定可以复杂，但读者每章必须知道主角赢了什么、失去了什么、下一步为什么危险。",
+            "",
+            "## 禁止",
+            "",
+            "- 长段百科说明。",
+            "- 纯规则辩论无身体代价。",
+            "- 只埋伏笔不兑现当前阅读快感。",
+        ]
+    else:
+        body = [
+            "# 改写边界",
+            "",
+            "## 允许",
+            "",
+            "- 调整表达、节奏、场景顺序和动作细节。",
+            "- 加强现场感、冲突和可感知爽点。",
+            "- 在不改变事实的前提下压掉 AI 腔。",
+            "",
+            "## 禁止",
+            "",
+            "- 未经确认改主线结局。",
+            "- 未经确认改角色核心动机。",
+            "- 未经确认新增高阶技能、关键道具或时间线事实。",
+            "- 为了爽点临时削弱强角色或让反派降智。",
+        ]
+
+    return "\n".join([body[0], "", f"> 项目：{title}｜题材：{genre}｜创建：{now}", *body[2:], ""])
+
+
+def _build_optional_fanfic_doc(title: str, genre: str, now: str, kind: str) -> str:
+    if kind == "source_timeline":
+        return "\n".join(
+            [
+                "# 原作时间线",
+                "",
+                f"> 项目：{title}｜题材：{genre}｜创建：{now}",
+                "",
+                "非同人/非衍生项目可留空。同人/衍生项目必须用本文件约束原作节点。",
+                "",
+                "| 原作节点 | 原作时间 | 当前处理 | 改写影响 | 关联章节 |",
+                "| --- | --- | --- | --- | --- |",
+                "| （待填写） |  | 保留/提前/延后/改写 |  |  |",
+                "",
+            ]
+        )
+    return "\n".join(
+        [
+            "# 同人分歧点",
+            "",
+            f"> 项目：{title}｜题材：{genre}｜创建：{now}",
+            "",
+            "非同人/非衍生项目可留空。同人/衍生项目必须记录每次改写原作带来的后果。",
+            "",
+            "| 分歧点 | 发生章节 | 原作结果 | 本书结果 | 后续剧情债 |",
+            "| --- | --- | --- | --- | --- |",
+            "| （待填写） |  |  |  |  |",
+            "",
+        ]
+    )
+
+
+def _build_codex_no_skill_doc(title: str, genre: str, now: str) -> str:
+    return "\n".join(
+        [
+            "---",
+            "name: no-webnovel-write",
+            "description: Use when writing or continuing this webnovel-writer book with Novel-Control-Station/No as the prose engine, while preserving the dashboard, cards, timeline, story-system contracts, and chapter commit flow.",
+            "---",
+            "",
+            "# No Webnovel Write",
+            "",
+            f"> Project: {title}｜Genre: {genre}｜Initialized: {now}",
+            "",
+            "## Intent",
+            "",
+            "Use No/NCS only as the prose engine. Keep webnovel-writer as the control station for:",
+            "",
+            "- project binding and book switching",
+            "- dashboard and menus",
+            "- character cards, skill cards, item cards, and setting files",
+            "- outlines, timelines, beat sheets, summaries, memory, and index.db",
+            "- reviewer, data-agent, chapter-commit, and projection updates",
+            "",
+            "Do not replace the existing panel or information-card system.",
+            "",
+            "## Required Source",
+            "",
+            "Before drafting, locate the sibling Novel-Control-Station-Skill. Prefer these paths in order:",
+            "",
+            "1. `../Novel-Control-Station-Skill/SKILL.md`",
+            "2. `../../Novel-Control-Station-Skill/SKILL.md`",
+            "3. `/Users/liangfushou/project/小说/new/Novel-Control-Station-Skill/SKILL.md`",
+            "",
+            "For de-AI cleanup, load the NCS authenticity/de-AI reference only when needed.",
+            "",
+            "If present, also load:",
+            "",
+            "- `.webnovel/anti_ai_rewrite_manual.md`",
+            "- `.webnovel/anti_ai_checklist.md`",
+            "- `.webnovel/post_chapter_update_checklist.md`",
+            "- `规划/写作流程.md`",
+            "- `规划/No正文生成提示词.md`",
+            "- `大纲/前期爽点重写方案.md`",
+            "",
+            "## Writing Workflow",
+            "",
+            "1. Resolve the active book with the existing webnovel-writer CLI.",
+            "",
+            "```bash",
+            "python -X utf8 webnovel-writer/scripts/webnovel.py --project-root \"$PWD\" preflight",
+            "python -X utf8 webnovel-writer/scripts/webnovel.py --project-root \"$PWD\" where",
+            "```",
+            "",
+            "2. Determine the target chapter from the user request, or use `current_chapter + 1` from `.webnovel/state.json`.",
+            "",
+            "3. Refresh the runtime contracts if the chapter contract is missing or stale. Do not draft from a previous chapter's contract.",
+            "",
+            "4. Build the No bridge package before drafting.",
+            "",
+            "```bash",
+            "python -X utf8 webnovel-writer/scripts/webnovel.py --project-root \"$PROJECT_ROOT\" ncs-bridge --chapter \"$CHAPTER_NUM\" --recent-chapters 3",
+            "```",
+            "",
+            "5. Draft through No/NCS from `.webnovel/tmp/ncs-bridge/` standard files, the chapter control card, and recent chapters.",
+            "",
+            "6. Put the accepted chapter back into the normal webnovel-writer manuscript path:",
+            "",
+            "`正文/第NNNN章-标题.md`",
+            "",
+            "7. Continue with the existing reviewer, data-agent, chapter-commit, projection, and dashboard flow. NCS must not write directly to `.webnovel/state.json` as the source of truth.",
+            "",
+            "8. Before chapter commit, run the post-chapter update checklist. If the chapter changes any character, skill, item, timeline event, relationship, foreshadowing, or world-state fact, update the corresponding cards/indexes before finalizing.",
+            "",
+            "## Drafting Order",
+            "",
+            "Use this order for every manuscript chapter:",
+            "",
+            "1. Use No Webnovel Write as the main writing flow.",
+            "2. Draft from the bridge/context files and existing chapter contract.",
+            "3. Run a light anti-AI/authenticity pass after the draft.",
+            "4. The anti-AI pass may only change language, rhythm, dialogue naturalness, and paragraph texture.",
+            "5. The anti-AI pass must not change plot facts, character motivation, timeline, power/skill state, item ownership, foreshadowing state, or add new settings.",
+            "6. Re-check continuity after the anti-AI pass before committing.",
+            "",
+            "## Post-Chapter Update Requirements",
+            "",
+            "After the accepted chapter is written, update every affected source of truth. Do not rely on the prose alone.",
+            "",
+            "Required checks:",
+            "",
+            "- character cards and character state",
+            "- relationships and relationship events",
+            "- skill cards, ownership, cooldown/limits, injuries, unlock state, and skill evolution",
+            "- item cards, ownership, location, damage, consumption, transfer, loss, or unlock state",
+            "- skill/item timeline if any skill or object appears, changes hands, changes state, or creates a future obligation",
+            "- if a new skill or item enters正文 from plan state, create or update its card before finalizing",
+            "- outline/timeline/event logs if the chapter advances or changes planned events",
+            "- foreshadowing ledger if a clue is planted, paid off, delayed, or invalidated",
+            "- chapter summary, memory, index.db, state.json, and projection outputs through the normal webnovel-writer commit flow",
+            "",
+            "Rules:",
+            "",
+            "- If nothing changed, explicitly record `no state update needed` in the working notes/check result.",
+            "- Never silently change a card to make the new prose fit; if the prose contradicts a card, fix the prose or surface the conflict.",
+            "- Anti-AI cleanup must never change state-bearing facts after this check without re-running the check.",
+            "",
+            "## Anti-AI Taste Rules",
+            "",
+            "Preserve scene meaning, but reduce:",
+            "",
+            "- generic emotional summaries",
+            "- tidy three-part explanatory prose",
+            "- slogans, false depth, and conclusion sentences",
+            "- analysis-tone words in narration",
+            "- samey dialogue and over-polished speaker rhythm",
+            "- decorative blank-line chopping",
+            "- overused explanatory forms such as `不是……而是……`, `这意味着……`, `他明白一件事`",
+            "",
+            "Do not add fake human flavor just to look less AI. Make the scene more concrete, pressured, and voiced.",
+            "",
+            "## Early Hook Rules",
+            "",
+            "For chapters 1-30, do not let the chapter become pure archive investigation or rule debate. A clue must quickly turn into pressure, pursuit, betrayal, a visible choice, a concrete win/loss, or an original-canon callback.",
+            "",
+        ]
+    )
+
+
+def _build_codex_project_doc(title: str, genre: str, now: str) -> str:
+    return "\n".join(
+        [
+            "# Codex Project Notes",
+            "",
+            f"- Project: {title}",
+            f"- Genre: {genre}",
+            f"- Initialized: {now}",
+            "",
+            "## Default Writing Rule",
+            "",
+            "When writing chapters in this project, use the local `no-webnovel-write` skill. The project should keep webnovel-writer as the source of truth for cards, timelines, contracts, summaries, memory, index.db, and dashboard state.",
+            "",
+            "No/NCS is the prose engine only. It must not bypass chapter contracts or write state-bearing facts without the normal post-chapter update flow.",
+            "",
+        ]
+    )
+
+
 def _inject_volume_rows(template_text: str, target_chapters: int, *, chapters_per_volume: int = 50) -> str:
     """在总纲模板的卷表中注入卷行（若存在表头）。"""
     lines = template_text.splitlines()
@@ -269,15 +881,22 @@ def init_project(
 
     # 目录结构（同时兼容“卷目录”与后续扩展）
     directories = [
+        ".codex/skills/no-webnovel-write",
+        ".story-system/chapters",
+        ".story-system/commits",
+        ".story-system/reviews",
+        ".story-system/volumes",
         ".webnovel/backups",
         ".webnovel/archive",
         ".webnovel/summaries",
         "设定集/角色库/主要角色",
         "设定集/角色库/次要角色",
         "设定集/角色库/反派角色",
+        "设定集/技能卡",
         "设定集/物品库",
         "设定集/其他设定",
         "大纲",
+        "规划",
         "正文",
         "审查报告",
     ]
@@ -382,6 +1001,63 @@ def init_project(
 
     # 基础文件（只在缺失时生成，避免覆盖已有内容）
     now = datetime.now().strftime("%Y-%m-%d")
+
+    _write_text_if_missing(
+        project_path / "规划" / "写作流程.md",
+        _build_writing_workflow_doc(title, genre, now),
+    )
+    _write_text_if_missing(
+        project_path / "规划" / "No正文生成提示词.md",
+        _build_no_prompt_doc(title, genre, now),
+    )
+    _write_text_if_missing(
+        project_path / ".webnovel" / "post_chapter_update_checklist.md",
+        _build_post_chapter_checklist(title, genre, now),
+    )
+    _write_text_if_missing(
+        project_path / "设定集" / "技能物品时间线.md",
+        _build_skill_item_timeline_doc(title, genre, now),
+    )
+    _write_text_if_missing(
+        project_path / "设定集" / "技能卡" / "技能卡总表.md",
+        _build_skill_index_doc(title, genre, now),
+    )
+    _write_text_if_missing(
+        project_path / "设定集" / "技能卡" / "中后期人物技能更新总表.md",
+        _build_mid_late_skill_doc(title, genre, now),
+    )
+    _write_text_if_missing(
+        project_path / "设定集" / "物品库" / "物品卡总表.md",
+        _build_item_index_doc(title, genre, now),
+    )
+    _write_text_if_missing(
+        project_path / "设定集" / "OOC禁区.md",
+        _build_simple_policy_doc(title, genre, now, "ooc"),
+    )
+    _write_text_if_missing(
+        project_path / "设定集" / "平台风格约束.md",
+        _build_simple_policy_doc(title, genre, now, "platform"),
+    )
+    _write_text_if_missing(
+        project_path / "设定集" / "改写边界.md",
+        _build_simple_policy_doc(title, genre, now, "rewrite"),
+    )
+    _write_text_if_missing(
+        project_path / "设定集" / "原作时间线.md",
+        _build_optional_fanfic_doc(title, genre, now, "source_timeline"),
+    )
+    _write_text_if_missing(
+        project_path / "设定集" / "同人分歧点.md",
+        _build_optional_fanfic_doc(title, genre, now, "fanfic_divergence"),
+    )
+    _write_text_if_missing(
+        project_path / ".codex" / "skills" / "no-webnovel-write" / "SKILL.md",
+        _build_codex_no_skill_doc(title, genre, now),
+    )
+    _write_text_if_missing(
+        project_path / ".codex" / "PROJECT.md",
+        _build_codex_project_doc(title, genre, now),
+    )
 
     worldview_content = output_worldview.strip() if output_worldview else ""
     if not worldview_content:
@@ -750,8 +1426,15 @@ __pycache__/
     print(" - 设定集/力量体系.md")
     print(" - 设定集/主角卡.md")
     print(" - 设定集/金手指设计.md")
+    print(" - 设定集/技能物品时间线.md")
+    print(" - 设定集/技能卡/技能卡总表.md")
+    print(" - 设定集/物品库/物品卡总表.md")
     print(" - 大纲/总纲.md")
     print(" - 大纲/爽点规划.md")
+    print(" - 规划/写作流程.md")
+    print(" - 规划/No正文生成提示词.md")
+    print(" - .webnovel/post_chapter_update_checklist.md")
+    print(" - .codex/skills/no-webnovel-write/SKILL.md")
 
 
 def main() -> None:

@@ -2,7 +2,7 @@ import { startTransition, useEffect, useMemo, useState } from 'react'
 import { useDashboardContext } from '../App.jsx'
 import Badge from '../components/Badge.jsx'
 import { fetchFileContent, fetchFilesTree } from '../api.js'
-import { findFirstFilePath } from '../lib/files.js'
+import { findFirstFilePath, hasFilePath } from '../lib/files.js'
 
 function countTreeItems(items) {
     return (items || []).reduce(
@@ -74,14 +74,16 @@ export default function FilesPage() {
                 if (!cancelled) {
                     setTree(payload)
                     const initialPath = findFirstFilePath(payload)
-                    if (initialPath) {
-                        setSelectedPath(current => current || initialPath)
-                    }
+                    setSelectedPath(current => {
+                        if (current && hasFilePath(payload, current)) return current
+                        return initialPath
+                    })
                 }
             })
             .catch(() => {
                 if (!cancelled) {
                     setTree({})
+                    setSelectedPath(null)
                 }
             })
 
@@ -133,7 +135,7 @@ export default function FilesPage() {
                 <article className="card files-tree-card">
                     <div className="card-header">
                         <div>
-                            <div className="section-label">FILE TREE</div>
+                            <div className="section-label">目录树</div>
                             <div className="card-title">目录树</div>
                         </div>
                         <Badge tone="cyan">正文 / 大纲 / 设定集</Badge>
@@ -167,7 +169,7 @@ export default function FilesPage() {
                 <article className="card files-preview-card">
                     <div className="card-header">
                         <div>
-                            <div className="section-label">FILE PREVIEW</div>
+                            <div className="section-label">内容预览</div>
                             <div className="card-title">内容预览</div>
                         </div>
                         {selectedPath ? (

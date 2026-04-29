@@ -6,6 +6,7 @@ import ChartWrapper from '../components/ChartWrapper.jsx'
 import Pager from '../components/Pager.jsx'
 import { STRAND_COLORS, buildBoxplotData } from '../lib/charts.js'
 import { average, formatChapterLabel, formatNumber, formatShortNumber } from '../lib/format.js'
+import { formatStrand } from '../lib/labels.js'
 import { groupChaptersByVolume } from '../lib/story.js'
 
 const WINDOW_SIZE = 50
@@ -23,7 +24,7 @@ function buildHookOption(items) {
             min: 0,
             max: 5,
             axisLabel: {
-                formatter: value => ['', 'weak', '', 'medium', '', 'strong'][value] || '',
+                formatter: value => ['', '弱', '', '中', '', '强'][value] || '',
             },
         },
         series: [
@@ -60,7 +61,7 @@ function buildStrandStackOption(items) {
     const chapters = items.map(item => item.chapter)
     return {
         tooltip: { trigger: 'axis' },
-        legend: { bottom: 0, data: ['Quest', 'Fire', 'Constellation'] },
+        legend: { bottom: 0, data: [formatStrand('quest'), formatStrand('fire'), formatStrand('constellation')] },
         xAxis: {
             type: 'category',
             data: chapters,
@@ -73,7 +74,7 @@ function buildStrandStackOption(items) {
         },
         series: [
             {
-                name: 'Quest',
+                name: formatStrand('quest'),
                 type: 'bar',
                 stack: 'strand',
                 data: items.map(item => (item.strand === 'quest' ? 1 : 0)),
@@ -85,7 +86,7 @@ function buildStrandStackOption(items) {
                 },
             },
             {
-                name: 'Fire',
+                name: formatStrand('fire'),
                 type: 'bar',
                 stack: 'strand',
                 data: items.map(item => (item.strand === 'fire' ? 1 : 0)),
@@ -96,7 +97,7 @@ function buildStrandStackOption(items) {
                 },
             },
             {
-                name: 'Constellation',
+                name: formatStrand('constellation'),
                 type: 'bar',
                 stack: 'strand',
                 data: items.map(item => (item.strand === 'constellation' ? 1 : 0)),
@@ -120,7 +121,7 @@ function buildWordBoxOption(groups) {
         yAxis: {
             type: 'value',
             axisLabel: {
-                formatter: value => `${formatShortNumber(Number(value) / 1000)}k`,
+                formatter: value => `${formatShortNumber(Number(value) / 1000)}千`,
             },
         },
         series: [
@@ -235,12 +236,12 @@ export default function PacingPage() {
                 <StatCard
                     label="平均钩子强度"
                     value={hookAverage ? formatShortNumber(hookAverage) : '—'}
-                    sub="映射 weak=1 / medium=3 / strong=5"
+                    sub="映射：弱=1 / 中=3 / 强=5"
                 />
                 <StatCard
                     label="过渡章"
                     value={String(transitionCount)}
-                    sub="当前窗口内标记为 transition 的章节"
+                    sub="当前窗口内标记为过渡的章节"
                 />
                 <StatCard
                     label="总字数"
@@ -252,7 +253,7 @@ export default function PacingPage() {
             <article className="card">
                 <div className="card-header">
                     <div>
-                        <div className="section-label">HOOK TREND</div>
+                        <div className="section-label">钩子走势</div>
                         <div className="card-title">钩子强度走势</div>
                     </div>
                     <Badge tone="green">
@@ -285,8 +286,8 @@ export default function PacingPage() {
                 <article className="card">
                     <div className="card-header">
                         <div>
-                            <div className="section-label">STRAND STACK</div>
-                            <div className="card-title">Strand 分布（逐章）</div>
+                            <div className="section-label">叙事线堆叠</div>
+                            <div className="card-title">叙事线分布（逐章）</div>
                         </div>
                         <Badge tone="purple">堆叠柱状图</Badge>
                     </div>
@@ -294,7 +295,7 @@ export default function PacingPage() {
                         <ChartWrapper option={buildStrandStackOption(items)} />
                     ) : (
                         <div className="empty-state">
-                            <p>暂无 Strand 数据</p>
+                            <p>暂无叙事线数据</p>
                         </div>
                     )}
                 </article>
@@ -302,7 +303,7 @@ export default function PacingPage() {
                 <article className="card">
                     <div className="card-header">
                         <div>
-                            <div className="section-label">WORD BOXPLOT</div>
+                            <div className="section-label">字数箱线图</div>
                             <div className="card-title">章节字数分布</div>
                         </div>
                         <Badge tone="blue">按卷分组</Badge>

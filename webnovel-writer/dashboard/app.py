@@ -1,11 +1,13 @@
 """
 Webnovel Dashboard - FastAPI 主应用
 
-仅提供 GET 接口（严格只读）；所有文件读取经过 path_guard 防穿越校验。
+提供 Dashboard 只读查询接口，以及显式触发的导出/发布辅助接口。
+所有文件读取经过 path_guard 防穿越校验。
 """
 
 import asyncio
 import json
+import re
 import sqlite3
 import sys
 from datetime import datetime, timezone
@@ -13,7 +15,7 @@ from contextlib import asynccontextmanager, closing
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -69,7 +71,123 @@ def _load_state_payload(*, required: bool = False) -> dict:
     except (OSError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=500, detail=f"state.json 读取失败: {exc}") from exc
 
-    return payload if isinstance(payload, dict) else {}
+    return _normalize_state_payload(payload) if isinstance(payload, dict) else {}
+
+
+def _infer_volumes_planned(project_root: Path) -> list[dict]:
+    outline_dir = project_root / "大纲"
+    if not outline_dir.is_dir():
+        return []
+
+    planned = []
+    for path in sorted(outline_dir.glob("第*卷*详细大纲*.md")):
+        volume_match = re.search(r"第(\d+)卷", path.name)
+        if not volume_match:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        chapter_nums = [
+            int(item)
+            for item in re.findall(r"^##+\s*第\s*(\d+)\s*章", text, flags=re.MULTILINE)
+        ]
+        if not chapter_nums:
+            continue
+        volume_num = int(volume_match.group(1))
+        title_match = re.search(
+            r"^#\s*第\s*\d+\s*卷(?:详细大纲)?\s*[：:-]\s*(.+?)\s*$",
+            text,
+            flags=re.MULTILINE,
+        )
+        title = f"第{volume_num}卷"
+        if title_match:
+            title = f"第{volume_num}卷：{title_match.group(1).strip()}"
+        planned.append(
+            {
+                "volume": volume_num,
+                "chapters_range": f"{min(chapter_nums)}-{max(chapter_nums)}",
+                "title": title,
+            }
+        )
+    planned.sort(key=lambda item: int(item.get("volume") or 0))
+    return planned
+
+
+def _parse_chapter_range_end(chapter_range: object) -> int:
+    return _parse_chapter_range_bounds(chapter_range)[1]
+
+
+def _parse_chapter_range_bounds(chapter_range: object) -> tuple[int, int]:
+    raw = str(chapter_range or "").strip()
+    match = re.search(r"(\d+)\s*[-~—–至到]\s*(\d+)", raw)
+    if not match:
+        return (0, 0)
+    try:
+        return int(match.group(1)), int(match.group(2))
+    except ValueError:
+        return (0, 0)
+
+
+def _infer_target_chapters(volumes_planned: list[dict]) -> int:
+    return max((_parse_chapter_range_end(item.get("chapters_range")) for item in volumes_planned), default=0)
+
+
+def _safe_int(value: object, default: int = 0) -> int:
+    try:
+        return int(value or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_state_payload(payload: dict) -> dict:
+    """Add standard dashboard fields without discarding legacy No/NCS state keys."""
+    normalized = dict(payload)
+    project_root = _get_project_root()
+    volumes_planned = _infer_volumes_planned(project_root)
+    target_chapters = (
+        _safe_int(normalized.get("target_chapters"))
+        or _infer_target_chapters(volumes_planned)
+    )
+
+    if not isinstance(normalized.get("project_info"), dict):
+        project_info = dict(normalized.get("project") or {})
+        project_info.setdefault("title", normalized.get("book_title") or normalized.get("title") or "")
+        project_info.setdefault("book_id", normalized.get("book_id") or "")
+        project_info.setdefault("genre", normalized.get("genre") or normalized.get("book_genre") or "")
+        if not project_info.get("genre"):
+            master_path = _story_system_dir() / "MASTER_SETTING.json"
+            try:
+                master = json.loads(master_path.read_text(encoding="utf-8")) if master_path.is_file() else {}
+            except (OSError, json.JSONDecodeError):
+                master = {}
+            raw_genre = (master.get("route") or {}).get("primary_genre") or master.get("genre") or ""
+            project_info["genre"] = "、".join(raw_genre) if isinstance(raw_genre, list) else str(raw_genre)
+        if "total_planned_volumes" in normalized:
+            project_info.setdefault("target_volumes", normalized.get("total_planned_volumes"))
+        normalized["project_info"] = project_info
+    else:
+        project_info = dict(normalized.get("project_info") or {})
+        normalized["project_info"] = project_info
+
+    project_info.setdefault("target_words", normalized.get("target_words") or 2_000_000)
+    project_info.setdefault("target_chapters", target_chapters or normalized.get("target_chapters") or "")
+    project_info.setdefault("target_volumes", normalized.get("total_planned_volumes") or len(volumes_planned) or "")
+
+    progress = dict(normalized.get("progress") or {}) if isinstance(normalized.get("progress"), dict) else {}
+    progress.setdefault(
+        "current_chapter",
+        normalized.get("current_chapter") or normalized.get("last_completed_chapter") or 0,
+    )
+    progress.setdefault("current_volume", normalized.get("current_volume") or 1)
+    progress.setdefault("total_words", normalized.get("total_words") or 0)
+    progress.setdefault("target_chapters", target_chapters or normalized.get("target_chapters") or "")
+    progress.setdefault("total_planned_volumes", normalized.get("total_planned_volumes") or len(volumes_planned) or "")
+    progress.setdefault("chapter_status", normalized.get("chapter_status") or {})
+    progress.setdefault("volumes_planned", volumes_planned)
+    normalized["progress"] = progress
+
+    return normalized
 
 
 def _parse_json_value(raw: object, default):
@@ -86,6 +204,16 @@ def _parse_json_value(raw: object, default):
 
 
 def _resolve_volume_for_chapter(state: dict, chapter: int) -> int | None:
+    volume_item = _resolve_volume_item_for_chapter(state, chapter)
+    if not volume_item:
+        return None
+    try:
+        return int(volume_item.get("volume") or 0) or None
+    except (TypeError, ValueError):
+        return None
+
+
+def _resolve_volume_item_for_chapter(state: dict, chapter: int) -> dict | None:
     progress = state.get("progress") if isinstance(state, dict) else {}
     if not isinstance(progress, dict):
         return None
@@ -93,31 +221,23 @@ def _resolve_volume_for_chapter(state: dict, chapter: int) -> int | None:
     if not isinstance(volumes_planned, list):
         return None
 
-    best: tuple[int, int] | None = None
+    best: tuple[int, int, dict] | None = None
     for item in volumes_planned:
         if not isinstance(item, dict):
             continue
-        volume = item.get("volume")
-        if not isinstance(volume, int) or volume <= 0:
+        volume = _safe_int(item.get("volume"))
+        if volume <= 0:
             continue
-        chapter_range = str(item.get("chapters_range") or "").strip()
-        if "-" not in chapter_range:
-            continue
-        left, _, right = chapter_range.partition("-")
-        try:
-            start = int(left.strip())
-            end = int(right.strip())
-        except ValueError:
-            continue
+        start, end = _parse_chapter_range_bounds(item.get("chapters_range"))
         if start <= 0 or end <= 0 or start > end:
             continue
         if start <= chapter <= end:
-            candidate = (start, volume)
+            candidate = (start, volume, item)
             if best is None or candidate[0] > best[0] or (
                 candidate[0] == best[0] and candidate[1] < best[1]
             ):
                 best = candidate
-    return best[1] if best else None
+    return best[2] if best else None
 
 
 def _build_strand_map(state: dict) -> dict[int, str]:
@@ -142,12 +262,11 @@ def _build_strand_map(state: dict) -> dict[int, str]:
 
 
 def _extract_story_chapter(path: Path) -> int:
-    stem = path.stem
-    if "_" not in stem:
+    match = re.search(r"chapter_(\d{3,4})", path.name)
+    if not match:
         return 0
-    _, _, tail = stem.partition("_")
     try:
-        return int(tail.split(".")[0])
+        return int(match.group(1))
     except ValueError:
         return 0
 
@@ -217,6 +336,57 @@ def _build_env_status(project_root: Path) -> dict:
     }
 
 
+def _read_workflow_doc(project_root: Path, rel_path: str, title: str, required: bool = True) -> dict:
+    path = safe_resolve(project_root, rel_path)
+    exists = path.is_file()
+    content = ""
+    error = ""
+    if exists:
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            error = str(exc)
+    return {
+        "title": title,
+        "path": rel_path,
+        "exists": exists,
+        "required": required,
+        "content": content,
+        "error": error,
+    }
+
+
+def _build_workflow_status(project_root: Path) -> dict:
+    docs = [
+        _read_workflow_doc(project_root, "规划/写作流程.md", "写作流程"),
+        _read_workflow_doc(project_root, "规划/No正文生成提示词.md", "No 正文提示词"),
+        _read_workflow_doc(project_root, ".webnovel/post_chapter_update_checklist.md", "写后状态更新清单"),
+        _read_workflow_doc(project_root, "设定集/技能物品时间线.md", "技能物品时间线"),
+        _read_workflow_doc(project_root, "设定集/技能卡/技能卡总表.md", "技能卡总表"),
+        _read_workflow_doc(project_root, "设定集/物品库/物品卡总表.md", "物品卡总表"),
+        _read_workflow_doc(project_root, ".codex/skills/no-webnovel-write/SKILL.md", "Codex No 写作 Skill"),
+    ]
+
+    optional_docs = [
+        _read_workflow_doc(project_root, "设定集/原作时间线.md", "原作时间线", required=False),
+        _read_workflow_doc(project_root, "设定集/同人分歧点.md", "同人分歧点", required=False),
+        _read_workflow_doc(project_root, "设定集/OOC禁区.md", "OOC 禁区", required=False),
+        _read_workflow_doc(project_root, "设定集/平台风格约束.md", "平台风格约束", required=False),
+        _read_workflow_doc(project_root, "设定集/改写边界.md", "改写边界", required=False),
+    ]
+
+    required_missing = [item["path"] for item in docs if item["required"] and not item["exists"]]
+    optional_missing = [item["path"] for item in optional_docs if not item["exists"]]
+
+    return {
+        "ok": not required_missing,
+        "required_missing": required_missing,
+        "optional_missing": optional_missing,
+        "docs": docs,
+        "optional_docs": optional_docs,
+    }
+
+
 # ---------------------------------------------------------------------------
 # 应用工厂
 # ---------------------------------------------------------------------------
@@ -249,7 +419,7 @@ def create_app(project_root: str | Path | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_methods=["GET"],
+        allow_methods=["GET", "POST"],
         allow_headers=["*"],
     )
 
@@ -265,6 +435,148 @@ def create_app(project_root: str | Path | None = None) -> FastAPI:
     @app.get("/api/story-runtime/health")
     def story_runtime_health():
         return _build_story_runtime_health_report(_get_project_root())
+
+    # ===========================================================
+    # API：小说发布（显式操作，默认草稿）
+    # ===========================================================
+
+    from .publish_bridge import (
+        check_login_status,
+        check_playwright,
+        close_publish_manager,
+        create_book,
+        get_books,
+        get_remote_chapters,
+        get_task_status,
+        publish_chapters,
+        setup_browser,
+    )
+
+    @app.get("/api/publish/status")
+    def api_publish_status():
+        """检查发布环境状态（不访问番茄网络，只看依赖和本地登录态）。"""
+        playwright = check_playwright()
+        login = check_login_status()
+        return {
+            "playwright": playwright,
+            "login": login,
+            "ready": playwright["available"] and login["logged_in"],
+        }
+
+    @app.post("/api/publish/setup-browser")
+    def api_publish_setup_browser():
+        """打开登录浏览器，用户手动登录番茄作家后台。"""
+        task_id = setup_browser()
+        return {"task_id": task_id, "status": "pending"}
+
+    @app.get("/api/publish/books")
+    def api_publish_books():
+        """获取番茄作家后台书籍列表。"""
+        try:
+            return get_books(_get_project_root())
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.post("/api/publish/books")
+    def api_publish_create_book(
+        title: str = Body(...),
+        genre: str = Body(...),
+        synopsis: str = Body(...),
+        protagonist1: str = Body(""),
+        protagonist2: str = Body(""),
+    ):
+        """创建新书。"""
+        result = create_book(_get_project_root(), title, genre, synopsis, protagonist1, protagonist2)
+        if result.get("success"):
+            return result
+        raise HTTPException(status_code=400, detail=result.get("error", "创建失败"))
+
+    @app.get("/api/publish/books/{book_id}/remote-chapters")
+    def api_remote_chapters(book_id: str):
+        """获取番茄平台上的章节列表（已发布+草稿）。"""
+        result = get_remote_chapters(_get_project_root(), book_id)
+        if isinstance(result, dict) and "error" in result:
+            raise HTTPException(status_code=500, detail=result["error"])
+        return result
+
+    @app.post("/api/publish/chapters")
+    def api_publish_chapters(
+        book_id: str = Body(...),
+        range_spec: str = Body("all"),
+        publish_mode: str = Body("draft"),
+    ):
+        """发布章节（创建后台任务）。"""
+        task_id = publish_chapters(_get_project_root(), book_id, range_spec, publish_mode)
+        return {"task_id": task_id, "status": "pending"}
+
+    @app.get("/api/publish/task/{task_id}")
+    def api_publish_task_status(task_id: str):
+        """查询发布任务进度。"""
+        status = get_task_status(task_id)
+        if status is None:
+            raise HTTPException(404, f"任务 {task_id} 不存在")
+        return status
+
+    @app.post("/api/publish/close")
+    def api_close_publish_manager():
+        """显式关闭发布浏览器，释放资源。"""
+        return close_publish_manager()
+
+    # ===========================================================
+    # API：小说导出
+    # ===========================================================
+
+    from .export_bridge import (
+        do_export,
+        get_chapter_list,
+        get_export_info,
+        get_output_dir,
+        list_exports,
+    )
+
+    @app.get("/api/export/info")
+    def api_export_info():
+        """获取导出配置信息。"""
+        return get_export_info(_get_project_root())
+
+    @app.get("/api/export/chapters")
+    def api_export_chapters():
+        """获取可用章节列表。"""
+        return get_chapter_list(_get_project_root())
+
+    @app.post("/api/export/do")
+    def api_do_export(
+        format: str = Body(...),
+        range_spec: str = Body("all"),
+        author: str = Body(""),
+        cover_path: Optional[str] = Body(None),
+        style_path: Optional[str] = Body(None),
+    ):
+        """执行导出。"""
+        result = do_export(_get_project_root(), format, range_spec, author, cover_path, style_path)
+        if not result.get("success"):
+            raise HTTPException(400, detail=result.get("error"))
+        return result
+
+    @app.get("/api/export/files")
+    def api_list_exports():
+        """列出已导出的文件。"""
+        return list_exports(_get_project_root())
+
+    @app.get("/api/export/download/{filename}")
+    def api_download_export(filename: str):
+        """下载导出的文件。"""
+        if Path(filename).name != filename:
+            raise HTTPException(403, "非法文件名")
+        output_dir = get_output_dir(_get_project_root()).resolve()
+        file_path = (output_dir / filename).resolve()
+        try:
+            file_path.relative_to(output_dir)
+        except ValueError as exc:
+            raise HTTPException(403, "路径越界：禁止访问导出目录之外的文件") from exc
+        if not file_path.is_file():
+            raise HTTPException(404, "文件不存在")
+        return FileResponse(file_path, filename=filename)
 
     # ===========================================================
     # API：实体数据库（index.db 只读查询）
@@ -361,12 +673,19 @@ def create_app(project_root: str | Path | None = None) -> FastAPI:
 
     @app.get("/api/chapters")
     def list_chapters():
+        state = _load_state_payload()
         with closing(_get_db()) as conn:
             rows = conn.execute("SELECT * FROM chapters ORDER BY chapter ASC").fetchall()
             normalized = []
             for row in rows:
                 item = dict(row)
                 item["characters"] = _parse_json_value(item.get("characters"), [])
+                chapter_num = _safe_int(item.get("chapter"))
+                volume_item = _resolve_volume_item_for_chapter(state, chapter_num)
+                if volume_item:
+                    item["volume"] = volume_item.get("volume")
+                    item["volume_title"] = volume_item.get("title") or f"第{volume_item.get('volume')}卷"
+                    item["volume_range"] = volume_item.get("chapters_range") or ""
                 normalized.append(item)
             return normalized
 
@@ -526,27 +845,51 @@ def create_app(project_root: str | Path | None = None) -> FastAPI:
 
         paths = StoryContractPaths.from_project_root(project_root)
         master_payload = read_json_if_exists(paths.master_json) or {}
+        genre_value = (master_payload.get("route") or {}).get("primary_genre")
+        if not genre_value:
+            raw_genre = master_payload.get("genre") or ""
+            genre_value = "、".join(raw_genre) if isinstance(raw_genre, list) else str(raw_genre)
+        tone_value = (master_payload.get("master_constraints") or {}).get("core_tone")
+        if not tone_value:
+            tone = master_payload.get("tone") or {}
+            if isinstance(tone, dict):
+                tone_value = tone.get("style") or tone.get("prose") or ""
+
+        chapter_paths = paths.chapter_json_candidates(chapter) if chapter > 0 else []
+        review_paths = paths.review_json_candidates(chapter) if chapter > 0 else []
+        chapter_count = len(
+            {
+                _extract_story_chapter(path)
+                for path in paths.chapters_dir.glob("chapter_*.json")
+                if path.is_file() and _extract_story_chapter(path) > 0
+            }
+        ) if paths.chapters_dir.is_dir() else 0
+        review_count = len(
+            {
+                _extract_story_chapter(path)
+                for path in paths.reviews_dir.glob("chapter_*.json")
+                if path.is_file() and _extract_story_chapter(path) > 0
+            }
+        ) if paths.reviews_dir.is_dir() else 0
 
         return {
             "chapter": chapter,
             "current_volume": current_volume,
             "master": {
                 "exists": bool(master_payload),
-                "primary_genre": str(((master_payload.get("route") or {}).get("primary_genre") or "")),
-                "core_tone": str(
-                    ((master_payload.get("master_constraints") or {}).get("core_tone") or "")
-                ),
+                "primary_genre": str(genre_value or ""),
+                "core_tone": str(tone_value or ""),
             },
             "counts": {
                 "volumes": len(list(paths.volumes_dir.glob("volume_*.json"))) if paths.volumes_dir.is_dir() else 0,
-                "chapters": len(list(paths.chapters_dir.glob("chapter_*.json"))) if paths.chapters_dir.is_dir() else 0,
-                "reviews": len(list(paths.reviews_dir.glob("chapter_*.review.json"))) if paths.reviews_dir.is_dir() else 0,
+                "chapters": chapter_count,
+                "reviews": review_count,
                 "commits": len(list(paths.commits_dir.glob("chapter_*.commit.json"))) if paths.commits_dir.is_dir() else 0,
             },
             "current_contracts": {
                 "volume": paths.volume_json(current_volume).is_file(),
-                "chapter": paths.chapter_json(chapter).is_file() if chapter > 0 else False,
-                "review": paths.review_json(chapter).is_file() if chapter > 0 else False,
+                "chapter": any(path.is_file() for path in chapter_paths),
+                "review": any(path.is_file() for path in review_paths),
                 "commit": paths.commit_json(chapter).is_file() if chapter > 0 else False,
             },
         }
@@ -593,6 +936,11 @@ def create_app(project_root: str | Path | None = None) -> FastAPI:
             "checks": checks,
             "checked_at": datetime.now(timezone.utc).isoformat(),
         }
+
+    @app.get("/api/workflow")
+    def workflow_status():
+        """返回当前项目的写作流程、No 提示词、写后清单和 Codex skill 状态。"""
+        return _build_workflow_status(_get_project_root())
 
     @app.get("/api/state-changes")
     def list_state_changes(entity: Optional[str] = None, limit: int = 100):
@@ -794,7 +1142,10 @@ def create_app(project_root: str | Path | None = None) -> FastAPI:
             if not folder.is_dir():
                 result[folder_name] = []
                 continue
-            result[folder_name] = _walk_tree(folder, root)
+            if folder_name == "正文":
+                result[folder_name] = _build_chapter_volume_tree(folder, root)
+            else:
+                result[folder_name] = _walk_tree(folder, root)
         return result
 
     @app.get("/api/files/read")
@@ -802,6 +1153,8 @@ def create_app(project_root: str | Path | None = None) -> FastAPI:
         """只读读取一个文件内容（限 正文/大纲/设定集 目录）。"""
         root = _get_project_root()
         resolved = safe_resolve(root, path)
+        if _has_hidden_path_segment(resolved, root):
+            raise HTTPException(404, "文件不存在")
 
         # 二次限制：只允许三大目录
         allowed_parents = [root / n for n in ("正文", "大纲", "设定集")]
@@ -875,12 +1228,91 @@ def create_app(project_root: str | Path | None = None) -> FastAPI:
 def _walk_tree(folder: Path, root: Path) -> list[dict]:
     items = []
     for child in sorted(folder.iterdir()):
+        if child.name.startswith("."):
+            continue
         rel = str(child.relative_to(root)).replace("\\", "/")
         if child.is_dir():
             items.append({"name": child.name, "type": "dir", "path": rel, "children": _walk_tree(child, root)})
         else:
             items.append({"name": child.name, "type": "file", "path": rel, "size": child.stat().st_size})
     return items
+
+
+def _build_chapter_volume_tree(folder: Path, root: Path) -> list[dict]:
+    files = sorted(
+        _iter_file_entries(folder, root),
+        key=lambda item: (_chapter_number_from_filename(item["name"]) or 10**9, item["path"]),
+    )
+    volumes = _infer_volumes_planned(root)
+    if not files or not volumes:
+        return files
+
+    grouped: list[dict] = []
+    assigned_paths = set()
+    for volume in volumes:
+        start, end = _parse_chapter_range_bounds(volume.get("chapters_range"))
+        if not start or not end:
+            continue
+        children = [
+            item
+            for item in files
+            if start <= (_chapter_number_from_filename(item["name"]) or -1) <= end
+        ]
+        if not children:
+            continue
+        assigned_paths.update(item["path"] for item in children)
+        volume_num = int(volume.get("volume") or len(grouped) + 1)
+        grouped.append(
+            {
+                "name": str(volume.get("title") or f"第{volume_num}卷"),
+                "type": "dir",
+                "path": f"正文/__volume_{volume_num}",
+                "children": children,
+            }
+        )
+
+    unassigned = [item for item in files if item["path"] not in assigned_paths]
+    if unassigned:
+        grouped.append(
+            {
+                "name": "未分卷章节",
+                "type": "dir",
+                "path": "正文/__volume_unassigned",
+                "children": unassigned,
+            }
+        )
+    return grouped or files
+
+
+def _iter_file_entries(folder: Path, root: Path):
+    for child in sorted(folder.iterdir()):
+        if child.name.startswith("."):
+            continue
+        if child.is_dir():
+            yield from _iter_file_entries(child, root)
+            continue
+        rel = str(child.relative_to(root)).replace("\\", "/")
+        yield {"name": child.name, "type": "file", "path": rel, "size": child.stat().st_size}
+
+
+def _chapter_number_from_filename(name: str) -> int:
+    match = re.search(r"第\s*0*(\d+)\s*章", name)
+    if not match:
+        match = re.search(r"chapter[_-]?0*(\d+)", name, flags=re.IGNORECASE)
+    if not match:
+        return 0
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return 0
+
+
+def _has_hidden_path_segment(path: Path, root: Path) -> bool:
+    try:
+        relative_parts = path.resolve().relative_to(root.resolve()).parts
+    except ValueError:
+        return True
+    return any(part.startswith(".") for part in relative_parts)
 
 
 def _is_child(path: Path, parent: Path) -> bool:

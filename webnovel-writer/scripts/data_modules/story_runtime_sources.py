@@ -51,6 +51,14 @@ def _load_latest_accepted_commit(paths: StoryContractPaths, chapter: int) -> dic
     return None
 
 
+def _read_first_json(paths: list[Path]) -> dict[str, Any]:
+    for path in paths:
+        payload = read_json_if_exists(path)
+        if payload:
+            return payload
+    return {}
+
+
 def load_runtime_sources(project_root: Path, chapter: int) -> RuntimeSourceSnapshot:
     project_root = Path(project_root)
     paths = StoryContractPaths.from_project_root(project_root)
@@ -59,8 +67,8 @@ def load_runtime_sources(project_root: Path, chapter: int) -> RuntimeSourceSnaps
     contracts = {
         "master": read_json_if_exists(paths.master_json) or {},
         "volume": read_json_if_exists(paths.volume_json(volume)) or {},
-        "chapter": read_json_if_exists(paths.chapter_json(chapter)) or {},
-        "review": read_json_if_exists(paths.review_json(chapter)) or {},
+        "chapter": _read_first_json(paths.chapter_json_candidates(chapter)),
+        "review": _read_first_json(paths.review_json_candidates(chapter)),
     }
     latest_commit = _load_latest_commit(paths, chapter)
     latest_accepted_commit = _load_latest_accepted_commit(paths, chapter)

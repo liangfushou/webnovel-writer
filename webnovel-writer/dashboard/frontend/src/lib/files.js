@@ -17,3 +17,20 @@ function walkFirstFile(items) {
     }
     return null
 }
+
+export function hasFilePath(tree, targetPath) {
+    if (!targetPath) return false
+    for (const items of Object.values(tree || {})) {
+        if (walkHasFile(items, targetPath)) return true
+    }
+    return false
+}
+
+function walkHasFile(items, targetPath) {
+    if (!Array.isArray(items)) return false
+    for (const item of items) {
+        if (item?.type === 'file' && item?.path === targetPath) return true
+        if (item?.type === 'dir' && walkHasFile(item.children, targetPath)) return true
+    }
+    return false
+}

@@ -372,7 +372,7 @@ export default function CharactersPage() {
                         <article className="card">
                             <div className="card-header">
                                 <div>
-                                    <div className="section-label">ENTITY INDEX</div>
+                                    <div className="section-label">实体索引</div>
                                     <div className="card-title">实体列表</div>
                                 </div>
                                 <Badge tone="cyan">{typeFilter || '全部类型'}</Badge>
@@ -389,7 +389,7 @@ export default function CharactersPage() {
                         <article className="card sticky-card">
                             <div className="card-header">
                                 <div>
-                                    <div className="section-label">ENTITY DETAIL</div>
+                                    <div className="section-label">实体详情</div>
                                     <div className="card-title">{selected?.canonical_name || '未选择实体'}</div>
                                 </div>
                                 {selected?.tier ? <Badge tone="purple">{selected.tier}</Badge> : null}
@@ -397,7 +397,7 @@ export default function CharactersPage() {
                             {selected ? (
                                 <div className="entity-detail">
                                     <p><strong>类型：</strong>{selected.type || '未知'}</p>
-                                    <p><strong>ID：</strong><code>{selected.id}</code></p>
+                                    <p><strong>编号：</strong><code>{selected.id}</code></p>
                                     <p><strong>首现：</strong>{formatChapterLabel(selected.first_appearance)}</p>
                                     <p><strong>末现：</strong>{formatChapterLabel(selected.last_appearance)}</p>
                                     {selected.desc ? <p className="entity-desc">{selected.desc}</p> : null}
@@ -418,7 +418,7 @@ export default function CharactersPage() {
 
                             <div className="card-header compact-header">
                                 <div>
-                                    <div className="section-label">STATE CHANGES</div>
+                                    <div className="section-label">状态变化</div>
                                     <div className="card-title">状态变化历史</div>
                                 </div>
                                 <Badge tone="amber">{changes.length} 条</Badge>
@@ -450,10 +450,10 @@ export default function CharactersPage() {
                 <article className="card">
                     <div className="card-header">
                         <div>
-                            <div className="section-label">RELATION GRAPH</div>
+                            <div className="section-label">关系图谱</div>
                             <div className="card-title">关系图谱</div>
                         </div>
-                        <Badge tone="blue">ECharts graph · 力导向 · 时间轴</Badge>
+                        <Badge tone="blue">关系图 · 力导向 · 时间轴</Badge>
                     </div>
 
                     <div className="graph-toolbar">

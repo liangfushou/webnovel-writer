@@ -34,7 +34,7 @@ REGISTERED_CLI_SUBCOMMANDS = {
     "index", "state", "rag", "style", "entity", "context", "memory",
     "migrate", "status", "update-state", "backup", "archive",
     "init", "extract-context", "memory-contract", "review-pipeline",
-    "story-system", "chapter-commit", "story-events", "knowledge",
+    "story-system", "chapter-commit", "story-events", "ncs-bridge", "knowledge",
 }
 
 
@@ -257,10 +257,19 @@ def test_webnovel_review_skill_uses_unified_reviewer_pipeline():
     assert " workflow " not in skill_text
 
 
-def test_story_system_runtime_contract_commands_exist():
+def test_webnovel_review_skill_remains_review_only_without_rewrite_step():
+    text = (SKILLS_DIR / "webnovel-review" / "SKILL.md").read_text(encoding="utf-8")
+    assert "anti-ai-rewrite" not in text
+    assert "调用 standalone anti-AI rewrite skill" not in text
+
+
+def test_webnovel_write_skill_routes_step4_through_ncs_bridge():
     text = (SKILLS_DIR / "webnovel-write" / "SKILL.md").read_text(encoding="utf-8")
     assert "story-system" in text
     assert "--emit-runtime-contracts" in text
+    assert "ncs-bridge" in text
+    assert "novel-station-adapter" in text
+    assert "anti-ai-rewrite" not in text
 
 
 def test_webnovel_write_skill_uses_chapter_commit_as_step5_mainline():
@@ -268,6 +277,32 @@ def test_webnovel_write_skill_uses_chapter_commit_as_step5_mainline():
     assert "chapter-commit" in text
     assert "CHAPTER_COMMIT" in text
     assert "state process-chapter" not in text
+
+
+def test_anti_ai_rewrite_skill_has_single_purpose_and_required_outputs():
+    text = (SKILLS_DIR / "anti-ai-rewrite" / "SKILL.md").read_text(encoding="utf-8")
+    assert "整章" in text
+    assert "anti_ai_force_check: pass|fail" in text
+    assert "不改剧情走向" in text
+    assert "不得把本 skill 当作 review 或 commit 的替代品。" in text
+    assert "不替代 `reviewer`" in text
+    assert "safe 路线" in text
+    assert "不为制造“人味”额外补生活回忆" in text
+
+
+def test_webnovel_write_step4_invokes_ncs_bridge_skill():
+    text = (SKILLS_DIR / "webnovel-write" / "SKILL.md").read_text(encoding="utf-8")
+    assert "../novel-station-adapter/SKILL.md" in text
+    assert "Novel-Control-Station-Skill" in text
+    assert "NCS 是本步骤的正文生成器" in text
+    assert "anti_ai_force_check=pass|fail" in text
+    assert "NCS 润色默认走 safe 路线" in text
+
+
+def test_reference_loading_map_registers_ncs_bridge_chain():
+    text = (REFERENCES_DIR / "index" / "reference-loading-map.md").read_text(encoding="utf-8")
+    assert "| webnovel-write | Step 2/4 | always | `skills/novel-station-adapter/SKILL.md` |" in text
+    assert "| anti-ai-rewrite | 执行阶段 | always | `skills/anti-ai-rewrite/references/rewrite-rules.md` |" in text
 
 
 def test_webnovel_query_skill_prefers_story_system_and_memory_contract():
@@ -307,22 +342,25 @@ def test_dashboard_and_plan_skills_surface_story_runtime_mainline():
     assert ".story-system/" in plan_text
 
 
-def test_webnovel_write_skill_routes_step2_through_writing_brief():
+def test_webnovel_write_skill_routes_step2_through_ncs_bridge():
     text = (SKILLS_DIR / "webnovel-write" / "SKILL.md").read_text(encoding="utf-8")
-    assert "写作任务书" in text
-    assert "context-agent" in text
+    assert "ncs-bridge" in text
+    assert ".webnovel/tmp/ncs-bridge/" in text
+    assert "control-cards" in text
+    assert "禁止只根据临时任务书或单章提示直接起草" in text
     assert "Step 0.5" not in text
     assert 'cat "${SKILL_ROOT}/../../references/shared/core-constraints.md"' not in text
     assert 'cat "${SKILL_ROOT}/references/anti-ai-guide.md"' not in text
 
 
-def test_context_agent_and_write_skill_form_isolated_write_chain():
+def test_context_agent_remains_available_but_write_skill_uses_ncs_mainline():
     context_text = (AGENTS_DIR / "context-agent.md").read_text(encoding="utf-8")
     skill_text = (SKILLS_DIR / "webnovel-write" / "SKILL.md").read_text(encoding="utf-8")
 
     assert "写作任务书" in context_text
-    assert "写作任务书" in skill_text
-    assert "context-agent" in skill_text
+    assert "ncs-bridge" in skill_text
+    assert "Novel-Control-Station-Skill" in skill_text
+    assert "只根据任务书起草" not in skill_text
     assert "Context Contract" not in context_text
     assert "Step 2 直写提示词" not in context_text
 

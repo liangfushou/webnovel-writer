@@ -10,6 +10,12 @@ import {
     probeEnvStatus,
 } from '../api.js'
 import { formatChapterLabel, formatDateTime, formatNumber } from '../lib/format.js'
+import {
+    formatComponentName,
+    formatContractType,
+    formatProjectionName,
+    formatStatus,
+} from '../lib/labels.js'
 
 function statusTone(status) {
     const text = String(status || '').toLowerCase()
@@ -22,8 +28,8 @@ function statusTone(status) {
 function projectionSummary(projectionStatus) {
     const values = Object.values(projectionStatus || {})
     if (!values.length) return '无投影'
-    if (values.every(value => value === 'done')) return '5 路 projection OK'
-    return values.join(' / ')
+    if (values.every(value => value === 'done')) return '5 路投影正常'
+    return values.map(formatStatus).join(' / ')
 }
 
 function StatCard({ label, value, sub, tone = 'plain' }) {
@@ -94,7 +100,7 @@ export default function SystemPage() {
             {
                 type: 'COMMIT',
                 count: contractsSummary.counts?.commits || 0,
-                desc: `${contractsSummary.current_contracts?.commit ? '当前章已有 commit' : '当前章无 commit'}`,
+                desc: `${contractsSummary.current_contracts?.commit ? '当前章已有提交快照' : '当前章无提交快照'}`,
             },
         ]
     }, [contractsSummary])
@@ -113,22 +119,22 @@ export default function SystemPage() {
             {
                 name: 'embed',
                 ok: envStatus.embed?.api_key_present,
-                detail: `${envStatus.embed?.model || 'unknown'} · ${envStatus.embed?.base_url || 'no base url'}`,
+                detail: `${envStatus.embed?.model || '未知模型'} · ${envStatus.embed?.base_url || '未配置地址'}`,
             },
             {
                 name: 'rerank',
                 ok: envStatus.rerank?.api_key_present,
-                detail: `${envStatus.rerank?.model || 'unknown'} · ${envStatus.rerank?.base_url || 'no base url'}`,
+                detail: `${envStatus.rerank?.model || '未知模型'} · ${envStatus.rerank?.base_url || '未配置地址'}`,
             },
             {
                 name: 'vector_db',
                 ok: envStatus.vector_db?.exists && !envStatus.vector_db?.error,
-                detail: `${envStatus.vector_db?.record_count || 0} records · ${envStatus.vector_db?.size_bytes || 0} bytes`,
+                detail: `${envStatus.vector_db?.record_count || 0} 条记录 · ${envStatus.vector_db?.size_bytes || 0} 字节`,
             },
             {
                 name: 'rag_mode',
                 ok: Boolean(envStatus.rag_mode),
-                detail: envStatus.rag_mode,
+                detail: formatStatus(envStatus.rag_mode),
             },
         ]
     }, [envStatus, probeResult])
@@ -141,38 +147,38 @@ export default function SystemPage() {
 
             <div className="stat-grid">
                 <StatCard
-                    label="Story Runtime"
-                    value={runtimeHealth?.mainline_ready ? 'Mainline' : 'Fallback'}
-                    sub={`fallback: ${(runtimeHealth?.fallback_sources || []).join(', ') || 'none'}`}
+                    label="写作运行态"
+                    value={runtimeHealth?.mainline_ready ? '主线运行' : '降级运行'}
+                    sub={`降级来源：${(runtimeHealth?.fallback_sources || []).map(formatStatus).join('、') || '无'}`}
                 />
                 <StatCard
-                    label="Latest Commit"
-                    value={latestCommit?.status || runtimeHealth?.latest_commit_status || 'missing'}
-                    sub={latestCommit ? `${formatChapterLabel(latestCommit.chapter)} · ${projectionSummary(latestCommit.projection_status)}` : '暂无 commit 数据'}
+                    label="最新提交"
+                    value={formatStatus(latestCommit?.status || runtimeHealth?.latest_commit_status || 'missing')}
+                    sub={latestCommit ? `${formatChapterLabel(latestCommit.chapter)} · ${projectionSummary(latestCommit.projection_status)}` : '暂无提交数据'}
                 />
                 <StatCard
-                    label="RAG Mode"
-                    value={envStatus?.rag_mode || 'unknown'}
-                    sub={`${envStatus?.embed?.api_key_present ? 'embed ready' : 'embed missing'} · ${envStatus?.rerank?.api_key_present ? 'rerank ready' : 'rerank missing'}`}
+                    label="检索模式"
+                    value={formatStatus(envStatus?.rag_mode || 'unknown')}
+                    sub={`${envStatus?.embed?.api_key_present ? '嵌入配置已就绪' : '嵌入配置缺失'} · ${envStatus?.rerank?.api_key_present ? '重排配置已就绪' : '重排配置缺失'}`}
                 />
                 <StatCard
-                    label="Vector DB"
+                    label="向量库"
                     value={formatNumber(envStatus?.vector_db?.record_count || 0)}
-                    sub={`${envStatus?.vector_db?.size_bytes || 0} bytes`}
+                    sub={`${envStatus?.vector_db?.size_bytes || 0} 字节`}
                 />
             </div>
 
             <article className="card">
                 <div className="card-header">
                     <div>
-                        <div className="section-label">CONTRACT TREE</div>
+                        <div className="section-label">合同树</div>
                         <div className="card-title">合同树概览</div>
                     </div>
                     {contractsSummary ? <Badge tone="purple">{formatChapterLabel(contractsSummary.chapter)}</Badge> : null}
                 </div>
                 <DataTable
                     columns={[
-                        { key: 'type', label: '类型' },
+                        { key: 'type', label: '类型', render: row => formatContractType(row.type) },
                         {
                             key: 'count',
                             label: '数量',
@@ -191,8 +197,8 @@ export default function SystemPage() {
             <article className="card">
                 <div className="card-header">
                     <div>
-                        <div className="section-label">RECENT COMMITS</div>
-                        <div className="card-title">最近 Commit 历史</div>
+                        <div className="section-label">提交历史</div>
+                        <div className="card-title">最近提交历史</div>
                     </div>
                     <Badge tone="amber">{commits.length} 条</Badge>
                 </div>
@@ -206,32 +212,32 @@ export default function SystemPage() {
                         {
                             key: 'status',
                             label: '状态',
-                            render: row => <Badge tone={statusTone(row.status)}>{row.status}</Badge>,
+                            render: row => <Badge tone={statusTone(row.status)}>{formatStatus(row.status)}</Badge>,
                         },
                         {
                             key: 'state',
-                            label: 'state',
-                            render: row => <Badge tone={statusTone(row.projection_status?.state)}>{row.projection_status?.state || '—'}</Badge>,
+                            label: formatProjectionName('state'),
+                            render: row => <Badge tone={statusTone(row.projection_status?.state)}>{formatStatus(row.projection_status?.state)}</Badge>,
                         },
                         {
                             key: 'index',
-                            label: 'index',
-                            render: row => <Badge tone={statusTone(row.projection_status?.index)}>{row.projection_status?.index || '—'}</Badge>,
+                            label: formatProjectionName('index'),
+                            render: row => <Badge tone={statusTone(row.projection_status?.index)}>{formatStatus(row.projection_status?.index)}</Badge>,
                         },
                         {
                             key: 'summary',
-                            label: 'summary',
-                            render: row => <Badge tone={statusTone(row.projection_status?.summary)}>{row.projection_status?.summary || '—'}</Badge>,
+                            label: formatProjectionName('summary'),
+                            render: row => <Badge tone={statusTone(row.projection_status?.summary)}>{formatStatus(row.projection_status?.summary)}</Badge>,
                         },
                         {
                             key: 'memory',
-                            label: 'memory',
-                            render: row => <Badge tone={statusTone(row.projection_status?.memory)}>{row.projection_status?.memory || '—'}</Badge>,
+                            label: formatProjectionName('memory'),
+                            render: row => <Badge tone={statusTone(row.projection_status?.memory)}>{formatStatus(row.projection_status?.memory)}</Badge>,
                         },
                         {
                             key: 'vector',
-                            label: 'vector',
-                            render: row => <Badge tone={statusTone(row.projection_status?.vector)}>{row.projection_status?.vector || '—'}</Badge>,
+                            label: formatProjectionName('vector'),
+                            render: row => <Badge tone={statusTone(row.projection_status?.vector)}>{formatStatus(row.projection_status?.vector)}</Badge>,
                         },
                         {
                             key: 'updated_at',
@@ -242,7 +248,7 @@ export default function SystemPage() {
                     rows={commits}
                     rowKey={(row, index) => `${row.chapter || 0}-${index}`}
                     pageSize={8}
-                    emptyText="暂无 commit 记录"
+                    emptyText="暂无提交记录"
                     minWidth={980}
                 />
             </article>
@@ -250,8 +256,8 @@ export default function SystemPage() {
             <article className="card">
                 <div className="card-header">
                     <div>
-                        <div className="section-label">RAG DIAGNOSIS</div>
-                        <div className="card-title">RAG 环境</div>
+                        <div className="section-label">检索诊断</div>
+                        <div className="card-title">检索增强环境</div>
                     </div>
                     <button
                         type="button"
@@ -274,11 +280,11 @@ export default function SystemPage() {
                 ) : null}
                 <DataTable
                     columns={[
-                        { key: 'name', label: '组件' },
+                        { key: 'name', label: '组件', render: row => formatComponentName(row.name) },
                         {
                             key: 'ok',
                             label: '状态',
-                            render: row => <Badge tone={row.ok ? 'green' : 'red'}>{row.ok ? 'OK' : '缺失'}</Badge>,
+                            render: row => <Badge tone={row.ok ? 'green' : 'red'}>{row.ok ? '正常' : '缺失'}</Badge>,
                         },
                         { key: 'detail', label: '详情' },
                     ]}

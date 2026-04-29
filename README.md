@@ -75,10 +75,17 @@ RERANK_API_KEY=your_rerank_api_key
 ### 5) 开始写作
 
 ```bash
-/webnovel-plan 1      # 规划第 1 卷大纲
-/webnovel-write 1     # 写第 1 章
-/webnovel-review 1-5  # 审查第 1-5 章
+/webnovel-plan 1         # 规划第 1 卷大纲
+/webnovel-chapter 1      # 一键准备合同并写第 1 章
+/webnovel-write 1        # 写章主链，先生成 NCS 上下文包，再由 Novel-Control-Station-Skill 起草
+/webnovel-review 1-5     # 审查第 1-5 章
 ```
+
+其中：
+- `/webnovel-chapter 12` 可以直接写数字章号
+- `/webnovel-chapter` 不带数字时，默认取下一章
+- 生成章节仍回写到 `正文/` 和 `.webnovel/`，可视化面板无需额外适配
+- 写章前会生成 `.webnovel/tmp/ncs-bridge/`，其中包含人物卡、角色库、世界观、力量体系、总纲、卷时间线、卷节拍表、章节合同、最近摘要、伏笔和运行态情节线
 
 ### 6) 可视化面板（可选）
 

@@ -33,9 +33,14 @@
 | webnovel-plan | Step 7 | 需要追读力分析 | `references/reading-power-taxonomy.md` |
 | webnovel-plan | Step 7 | 需要章纲细化 | `skills/webnovel-plan/references/outlining/chapter-planning.md` |
 | webnovel-plan | Step 6/7 | 特定题材节奏 | `skills/webnovel-plan/references/outlining/genre-volume-pacing.md` |
+| webnovel-write | Step 2/4 | always | `skills/novel-station-adapter/SKILL.md` |
 | webnovel-write | Step 4 | always | `skills/webnovel-write/references/polish-guide.md` |
 | webnovel-write | Step 4 | always | `skills/webnovel-write/references/writing/typesetting.md` |
 | webnovel-write | Step 4 | always | `skills/webnovel-write/references/style-adapter.md` |
+| anti-ai-rewrite | 执行阶段 | always | `skills/webnovel-write/references/anti-ai-guide.md` |
+| anti-ai-rewrite | 执行阶段 | always | `skills/webnovel-write/references/polish-guide.md` |
+| anti-ai-rewrite | 执行阶段 | always | `skills/webnovel-write/references/style-adapter.md` |
+| anti-ai-rewrite | 执行阶段 | always | `skills/anti-ai-rewrite/references/rewrite-rules.md` |
 | webnovel-review | Step 2 | always | `references/shared/core-constraints.md` |
 | webnovel-review | Step 2 | always | `references/review-schema.md` |
 | webnovel-review | Step 2 | 审查涉及爽点或钩子分析 | `references/shared/cool-points-guide.md` |

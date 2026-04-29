@@ -10,7 +10,11 @@
 
 - `.webnovel/state.json`（运行时状态）
 - `设定集/`（世界观、力量体系、主角卡、金手指设计、反派设计等）
+- `设定集/技能卡/`、`设定集/物品库/`、`设定集/技能物品时间线.md`
 - `大纲/总纲.md`、`大纲/爽点规划.md`
+- `规划/写作流程.md`、`规划/No正文生成提示词.md`
+- `.webnovel/post_chapter_update_checklist.md`
+- `.codex/skills/no-webnovel-write/SKILL.md`
 - `.env.example`（RAG 配置模板）
 
 ### `/webnovel-plan [卷号]`
@@ -22,9 +26,63 @@
 /webnovel-plan 2-3
 ```
 
+### `/webnovel-chapter [数字]`
+
+完整处理某一章：自动准备章节合同，生成 NCS 上下文包，然后通过 `novel-station-adapter write` 进入 Novel-Control-Station-Skill 起草正文。
+
+```bash
+/webnovel-chapter 1
+/webnovel-chapter 12
+/webnovel-chapter
+```
+
+说明：
+
+- 可以直接写数字章号
+- 不写数字时，自动取 `.webnovel/state.json` 中的下一章
+- 兼容原有 `/webnovel-write [章号]` 的状态提交和面板展示
+- 写作前会生成 `.webnovel/tmp/ncs-bridge/`，把人物卡、角色库、世界观、力量体系、总纲、卷时间线、卷节拍表、章节合同、最近摘要和伏笔账本喂给 NCS
+
+### `/webnovel-writer:novel-station-adapter write|sync|polish [章号]`
+
+通过 Novel-Control-Station-Skill 生成、同步或润色章节，再适配回 webnovel-writer 的标准目录和提交链。
+
+```bash
+/webnovel-writer:novel-station-adapter write 1
+/webnovel-writer:novel-station-adapter polish 1
+/webnovel-writer:novel-station-adapter sync
+```
+
+说明：
+
+- `write` 使用 NCS 生成章节并回写到 `正文/`
+- `polish` 使用 NCS 的 authenticity pass 润色现有章节
+- `sync` 将当前项目转换为 NCS 标准文件
+- 面板继续读取 `正文/`、`.webnovel/`、`.story-system/`，不需要单独适配
+
+底层会先运行统一 CLI 的桥接命令，把人物卡、角色库、世界观、卷纲、时间线、节拍表、摘要、运行态情节线和 story-system 合同转换为 NCS 标准文件：
+
+```bash
+python -X utf8 "<CLAUDE_PLUGIN_ROOT>/scripts/webnovel.py" --project-root "<PROJECT_ROOT>" ncs-bridge --chapter 1
+```
+
+### `/webnovel-writer:anti-ai-rewrite [章号]`
+
+兼容旧入口：对现有章节执行整章 anti-AI 重写与终检，只改表达不改事实。主写章链路优先使用 `novel-station-adapter polish`。
+
+```bash
+/webnovel-writer:anti-ai-rewrite 1
+```
+
+说明：
+
+- 用于旧章节或临时返工
+- 输出 `anti_ai_force_check: pass|fail`
+- 通过后可继续回到 `/webnovel-write [章号]` 的提交主链
+
 ### `/webnovel-write [章号]`
 
-执行完整章节创作流程（`context-agent` 先 research 并生成写作任务书 → 按任务书起草正文 → 审查 → 润色 → 数据落盘）。
+执行完整章节创作流程（刷新合同 → `ncs-bridge` 生成上下文包 → Novel-Control-Station-Skill 起草正文 → 审查 → NCS 复查/轻润色 → 数据落盘）。
 
 ```bash
 /webnovel-write 1

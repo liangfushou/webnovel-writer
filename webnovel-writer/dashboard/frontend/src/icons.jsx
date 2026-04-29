@@ -163,3 +163,40 @@ export function SearchIcon(props) {
         </IconBase>
     )
 }
+
+export function BookOpenIcon(props) {
+    return (
+        <IconBase {...props}>
+            <rect x="3" y="5" width="8" height="14" />
+            <rect x="13" y="5" width="8" height="14" />
+            <rect x="11" y="6" width="2" height="13" />
+            <rect x="5" y="8" width="4" height="2" />
+            <rect x="15" y="8" width="4" height="2" />
+            <rect x="5" y="12" width="4" height="2" />
+            <rect x="15" y="12" width="4" height="2" />
+        </IconBase>
+    )
+}
+
+export function PackageIcon(props) {
+    return (
+        <IconBase {...props}>
+            <rect x="4" y="7" width="16" height="13" />
+            <rect x="7" y="4" width="10" height="4" />
+            <rect x="11" y="7" width="2" height="13" />
+            <rect x="4" y="11" width="16" height="2" />
+        </IconBase>
+    )
+}
+
+export function ClipboardIcon(props) {
+    return (
+        <IconBase {...props}>
+            <rect x="5" y="5" width="14" height="16" />
+            <rect x="8" y="3" width="8" height="4" />
+            <rect x="8" y="10" width="8" height="2" />
+            <rect x="8" y="14" width="6" height="2" />
+            <rect x="8" y="18" width="7" height="2" />
+        </IconBase>
+    )
+}

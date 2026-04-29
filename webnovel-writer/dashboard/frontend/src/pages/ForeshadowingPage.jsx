@@ -6,6 +6,7 @@ import DataTable from '../components/DataTable.jsx'
 import { FORESHADOWING_COLORS } from '../lib/charts.js'
 import { buildForeshadowingRecords, summarizeForeshadowing } from '../lib/foreshadowing.js'
 import { formatChapterLabel, formatShortNumber } from '../lib/format.js'
+import { formatUrgency } from '../lib/labels.js'
 
 const LEVEL_ORDER = {
     overdue: 4,
@@ -200,7 +201,7 @@ export default function ForeshadowingPage() {
             <article className="card">
                 <div className="card-header">
                     <div>
-                        <div className="section-label">FORESHADOW GANTT</div>
+                        <div className="section-label">伏笔时间线</div>
                         <div className="card-title">伏笔时间线</div>
                     </div>
                     {filter === 'all' ? <Badge tone="purple">默认折叠已回收</Badge> : <Badge tone="blue">按筛选展示</Badge>}
@@ -221,7 +222,7 @@ export default function ForeshadowingPage() {
             <article className="card">
                 <div className="card-header">
                     <div>
-                        <div className="section-label">FORESHADOW LIST</div>
+                        <div className="section-label">伏笔列表</div>
                         <div className="card-title">完整伏笔列表</div>
                     </div>
                     <Badge tone="amber">{tableRows.length} 条</Badge>
@@ -250,7 +251,7 @@ export default function ForeshadowingPage() {
                             render: row => (
                                 row.urgencyText === 'resolved'
                                     ? '—'
-                                    : <Badge tone={urgencyTone(row.urgencyText)}>{row.urgencyText}</Badge>
+                                    : <Badge tone={urgencyTone(row.urgencyText)}>{formatUrgency(row.urgencyText)}</Badge>
                             ),
                         },
                         {

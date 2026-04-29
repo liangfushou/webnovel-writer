@@ -36,6 +36,18 @@ def test_router_maps_world_rule_broken_to_memory_only():
     assert targets == ["memory", "vector"]
 
 
+def test_router_maps_open_loop_to_state_and_memory():
+    router = EventProjectionRouter()
+    targets = router.route(
+        {
+            "event_type": "open_loop_created",
+            "subject": "三年之约",
+            "payload": {"content": "三年之约"},
+        }
+    )
+    assert targets == ["state", "memory"]
+
+
 def test_router_collects_required_writers_from_commit_payload():
     router = EventProjectionRouter()
     targets = router.required_writers(

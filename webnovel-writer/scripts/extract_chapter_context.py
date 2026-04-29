@@ -121,6 +121,12 @@ def extract_state_summary(project_root: Path) -> str:
         summary_parts.append(
             f"**进度**: 第{progress.get('current_chapter', '?')}章 / {progress.get('total_words', '?')}字"
         )
+    elif "current_chapter" in state or "last_completed_chapter" in state:
+        summary_parts.append(
+            "**进度**: "
+            f"当前第{state.get('current_chapter', state.get('last_completed_chapter', '?'))}章"
+            f" / 第{state.get('current_volume', '?')}卷"
+        )
 
     if "protagonist_state" in state:
         ps = state["protagonist_state"]
@@ -386,4 +392,3 @@ if __name__ == "__main__":
     if sys.platform == "win32":
         enable_windows_utf8_stdio()
     main()
-

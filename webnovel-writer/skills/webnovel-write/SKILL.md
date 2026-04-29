@@ -1,10 +1,26 @@
 ---
 name: webnovel-write
-description: 产出可发布章节，完整执行上下文→起草→审查→润色→提交→备份。
-allowed-tools: Read Write Edit Grep Bash Task
+description: 产出可发布章节，完整执行合同刷新→NCS桥接→NCS起草→审查→提交→备份。
+allowed-tools: Read Write Edit Grep Bash Task Skill
 ---
 
 # 写章流程
+
+## 用法
+
+```
+/webnovel-writer:webnovel-write [章节号]
+```
+
+**章节号可选**：
+- 如果不提供章节号，自动从 `state.json` 读取 `current_chapter + 1`
+- 例如：当前写完第 1 章，直接运行 `/webnovel-writer:webnovel-write` 会自动写第 2 章
+
+## 前置要求
+
+**必须先运行** `/webnovel-writer:webnovel-prepare <章节号>` 生成章节合同。
+
+如果缺少合同文件，本 skill 会在预检阶段阻断并提示用户先运行 prepare。
 
 ## 目标
 
@@ -16,7 +32,7 @@ allowed-tools: Read Write Edit Grep Bash Task
 |------|------|
 | 默认 | Step 1→2→3→4→5→6 |
 | `--fast` | Step 1→2→3(轻量)→4→5→6 |
-| `--minimal` | Step 1→2→4(仅排版)→5→6 |
+| `--minimal` | Step 1→2→4(仅排版/终检)→5→6 |
 
 ## 硬规则
 
@@ -24,6 +40,8 @@ allowed-tools: Read Write Edit Grep Bash Task
 - blocking issue 未解决不进 Step 4/5
 - 失败只补跑失败步骤，不回退
 - 参考资料按步骤按需加载
+- 写正文前必须生成 `.webnovel/tmp/ncs-bridge/`，不得绕过 NCS bridge 直接起草
+- NCS 写作必须读取 00-09 标准文件、`control-cards/`、最近章节与正文连续性上下文
 
 ## 优先级
 
@@ -50,6 +68,17 @@ python -X utf8 "${SCRIPTS_DIR}/webnovel.py" --project-root "${WORKSPACE_ROOT}" p
 export PROJECT_ROOT="$(python -X utf8 "${SCRIPTS_DIR}/webnovel.py" --project-root "${WORKSPACE_ROOT}" where)"
 ```
 
+### 准备：确定章节号
+
+如果用户未提供章节号，从 state.json 自动读取：
+
+```bash
+if [ -z "${CHAPTER_NUM}" ]; then
+  CHAPTER_NUM=$(python -X utf8 -c "import json,sys; s=json.load(open('${PROJECT_ROOT}/.webnovel/state.json',encoding='utf-8')); print(s.get('progress',{}).get('current_chapter',0)+1)")
+  echo "自动检测到下一章节号: ${CHAPTER_NUM}"
+fi
+```
+
 ### 准备：刷新合同树
 
 genre 从 state.json 读取（唯一真源），query 填章纲目标（用于 CSV 检索）。
@@ -65,15 +94,42 @@ python -X utf8 "${SCRIPTS_DIR}/webnovel.py" --project-root "${WORKSPACE_ROOT}" \
 
 `chapter_{NNN}.json` 的 `chapter_focus` 仅为 CSV 参考，本章目标以章纲为准。核心价值是 `reasoning` 裁决元数据。
 
-### Step 1：context-agent 生成写作任务书
+### Step 1：生成 NCS 上下文包
 
-Task 调用 `context-agent`，传入 chapter/project_root/storage_path/state_file。
+先生成 Novel-Control-Station 标准桥接包。这个步骤是写作主链的硬门槛，不是可选润色资料。
 
-产物：一份写作任务书，能独立支撑 Step 2 起草。
+```bash
+python -X utf8 "${SCRIPTS_DIR}/webnovel.py" --project-root "${PROJECT_ROOT}" \
+  ncs-bridge --chapter "${CHAPTER_NUM}" --recent-chapters 3
+```
 
-### Step 2：起草正文
+必备产物：
+- `.webnovel/tmp/ncs-bridge/00-project-overview.md`
+- `.webnovel/tmp/ncs-bridge/02-worldbuilding.md`
+- `.webnovel/tmp/ncs-bridge/03-cast-bible.md`
+- `.webnovel/tmp/ncs-bridge/05-main-plotlines.md`
+- `.webnovel/tmp/ncs-bridge/06-foreshadow-ledger.md`
+- `.webnovel/tmp/ncs-bridge/07-chapter-roadmap.md`
+- `.webnovel/tmp/ncs-bridge/08-dynamic-state.md`
+- `.webnovel/tmp/ncs-bridge/09-style-guide.md`
+- `.webnovel/tmp/ncs-bridge/control-cards/{NN}-control-card.md`
+- `.webnovel/tmp/ncs-bridge/chapters/` 最近章节上下文
 
-只根据任务书起草。不加载 core-constraints/anti-ai-guide（已内化到任务书）。只输出纯正文，无占位符。有结构化节点时围绕 CBN→CPNs→CEN 展开。中文思维写作。
+这些文件会汇总人物卡、角色库、世界观、力量体系、总纲、卷详细大纲、卷时间线、卷节拍表、章节合同、审查合同、最近摘要、近期事件、主角状态、伏笔和运行态情节线。
+
+### Step 2：NCS 主写作
+
+加载 `../novel-station-adapter/SKILL.md`，按 `write` 模式调用 Novel-Control-Station-Skill。NCS 是本步骤的正文生成器，不是后置修辞插件。
+
+NCS 必须读取：
+- `00-project-overview.md` 到 `09-style-guide.md`
+- `control-cards/{NN}-control-card.md`
+- `chapters/` 中最近章节
+- 章级合同中的 CBN/CPNs/CEN、must_cover_nodes、forbidden_in_chapter
+
+NCS 输出到 `.webnovel/tmp/ncs-bridge/chapters/{NN}-<title>.md` 后，再适配回 `正文/第{NNNN}章-{title}.md`。
+
+禁止只根据临时任务书或单章提示直接起草。需要局部检索 CSV 时，只能作为 NCS 控制卡/写作提示的补充，不能覆盖桥接包中的时间线、人物状态和合同约束。
 
 ### Step 3：审查
 
@@ -90,13 +146,15 @@ python -X utf8 "${SCRIPTS_DIR}/webnovel.py" --project-root "${PROJECT_ROOT}" rev
 
 blocking=true → 修复后重审，不进 Step 4。`--fast` 只检查 setting/timeline/continuity。`--minimal` 跳过。
 
-### Step 4：润色
+### Step 4：NCS 复查与轻润色
 
-加载 `polish-guide.md`、`typesetting.md`、`style-adapter.md`。
+优先加载 `../novel-station-adapter/SKILL.md`、`polish-guide.md`、`typesetting.md`、`style-adapter.md`。
 
-顺序：修复非 blocking issue → 风格适配 → 排版 → Anti-AI 终检。
+顺序：修复非 blocking issue → 调用 Novel-Control-Station-Skill 的 `polish` / authenticity pass → 风格适配 → 排版 → NCS 终检。
 
-只改表达不改事实。`anti_ai_force_check=fail` 时不进 Step 5。`--minimal` 仅排版。
+NCS 润色默认走 safe 路线：先保留稳定底稿，只局部削高风险句型；必要时只打散最扎眼的一组段落。默认不靠额外补“人味句”来制造真人感。
+
+只改表达不改事实。`anti_ai_force_check=pass|fail` 继续作为 Step 5 的放行标记；`fail` 时不进 Step 5。`--minimal` 仅排版。`--fast` 可简化重写深度，但不能跳过终检 gate。
 
 ### Step 5：提交
 

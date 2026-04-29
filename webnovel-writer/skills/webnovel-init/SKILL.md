@@ -370,6 +370,13 @@ python -X utf8 "${SCRIPTS_DIR}/webnovel.py" --project-root "{project_root}" \
 test -f "{project_root}/.webnovel/state.json"
 find "{project_root}/设定集" -maxdepth 1 -type f -name "*.md"
 test -f "{project_root}/大纲/总纲.md"
+test -f "{project_root}/规划/写作流程.md"
+test -f "{project_root}/规划/No正文生成提示词.md"
+test -f "{project_root}/.webnovel/post_chapter_update_checklist.md"
+test -f "{project_root}/设定集/技能物品时间线.md"
+test -f "{project_root}/设定集/技能卡/技能卡总表.md"
+test -f "{project_root}/设定集/物品库/物品卡总表.md"
+test -f "{project_root}/.codex/skills/no-webnovel-write/SKILL.md"
 test -f "{project_root}/.webnovel/idea_bank.json"
 test -f "{project_root}/.story-system/MASTER_SETTING.json"
 ```
@@ -377,6 +384,9 @@ test -f "{project_root}/.story-system/MASTER_SETTING.json"
 成功标准：
 - `state.json` 存在且关键字段不为空（title/genre/target_words/target_chapters）。
 - 设定集核心文件存在：`世界观.md`、`力量体系.md`、`主角卡.md`、`金手指设计.md`。
+- 写作流程文件存在：`规划/写作流程.md`、`规划/No正文生成提示词.md`、`.webnovel/post_chapter_update_checklist.md`。
+- 技能/物品生命周期文件存在：`设定集/技能物品时间线.md`、`设定集/技能卡/技能卡总表.md`、`设定集/物品库/物品卡总表.md`。
+- Codex 项目级 skill 存在：`.codex/skills/no-webnovel-write/SKILL.md`。
 - `总纲.md` 已填核心主线与约束字段。
 - `idea_bank.json` 已写入且与最终选定方案一致。
 - `.story-system/MASTER_SETTING.json` 存在且 `route.primary_genre` 非空。

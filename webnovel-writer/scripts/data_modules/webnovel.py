@@ -30,10 +30,19 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+# CRITICAL: Ensure scripts/ is in sys.path BEFORE importing local modules
+# This allows the file to work both as a module and as a direct script
+_scripts_dir = Path(__file__).resolve().parent.parent
+if str(_scripts_dir) not in sys.path:
+    sys.path.insert(0, str(_scripts_dir))
+
 from runtime_compat import normalize_windows_path
 from project_locator import resolve_project_root, write_current_project_pointer, update_global_registry_current_project
 
-from .story_runtime_health import build_story_runtime_health
+try:
+    from .story_runtime_health import build_story_runtime_health
+except ImportError:  # pragma: no cover
+    from data_modules.story_runtime_health import build_story_runtime_health
 
 
 def _scripts_dir() -> Path:
@@ -259,6 +268,12 @@ def main() -> None:
     p_archive = sub.add_parser("archive", help="转发到 archive_manager.py")
     p_archive.add_argument("args", nargs=argparse.REMAINDER)
 
+    p_export = sub.add_parser("export", help="转发到 export_manager.py（正文导出）")
+    p_export.add_argument("args", nargs=argparse.REMAINDER)
+
+    p_publish = sub.add_parser("publish", help="转发到 publish_manager.py（番茄发布）")
+    p_publish.add_argument("args", nargs=argparse.REMAINDER)
+
     p_init = sub.add_parser("init", help="转发到 init_project.py（初始化项目）")
     p_init.add_argument("args", nargs=argparse.REMAINDER)
 
@@ -273,6 +288,12 @@ def main() -> None:
     p_story_events.add_argument("--chapter", type=int, default=0, help="目标章节号")
     p_story_events.add_argument("--limit", type=int, default=200, help="查询条数")
     p_story_events.add_argument("--health", action="store_true", help="输出事件链健康信息")
+
+    p_ncs_bridge = sub.add_parser("ncs-bridge", help="生成 Novel-Control-Station 标准桥接文件")
+    p_ncs_bridge.add_argument("--chapter", type=int, default=0, help="目标章节号；默认 current_chapter + 1")
+    p_ncs_bridge.add_argument("--output-dir", default="", help="输出目录；默认 PROJECT_ROOT/.webnovel/tmp/ncs-bridge")
+    p_ncs_bridge.add_argument("--recent-chapters", type=int, default=3, help="复制最近 N 章作为 NCS 上下文")
+    p_ncs_bridge.add_argument("--format", choices=["text", "json"], default="text", help="输出格式")
 
     p_commit = sub.add_parser("chapter-commit", help="转发到 chapter_commit.py")
     p_commit.add_argument("--chapter", type=int, required=True, help="目标章节号")
@@ -302,7 +323,10 @@ def main() -> None:
     qr_parser.add_argument("--at-chapter", type=int, required=True, help="目标章节号")
 
     # 兼容：允许 `--project-root` 出现在任意位置（减少 agents/skills 拼命令的出错率）
-    from .cli_args import normalize_global_project_root
+    try:
+        from .cli_args import normalize_global_project_root
+    except ImportError:  # pragma: no cover
+        from data_modules.cli_args import normalize_global_project_root
 
     argv = normalize_global_project_root(sys.argv[1:])
     args = parser.parse_args(argv)
@@ -352,6 +376,10 @@ def main() -> None:
         raise SystemExit(_run_script("backup_manager.py", [*forward_args, *rest]))
     if tool == "archive":
         raise SystemExit(_run_script("archive_manager.py", [*forward_args, *rest]))
+    if tool == "export":
+        raise SystemExit(_run_script("export_manager.py", [*forward_args, *rest]))
+    if tool == "publish":
+        raise SystemExit(_run_script("publish_manager.py", [*forward_args, *rest]))
     if tool == "extract-context":
         return_args = [*forward_args, "--chapter", str(args.chapter), "--format", str(args.format)]
         raise SystemExit(_run_script("extract_chapter_context.py", return_args))
@@ -364,6 +392,13 @@ def main() -> None:
         if args.health:
             return_args.append("--health")
         raise SystemExit(_run_script("story_events.py", return_args))
+    if tool == "ncs-bridge":
+        return_args = [*forward_args, "--recent-chapters", str(args.recent_chapters), "--format", str(args.format)]
+        if args.chapter:
+            return_args.extend(["--chapter", str(args.chapter)])
+        if args.output_dir:
+            return_args.extend(["--output-dir", str(args.output_dir)])
+        raise SystemExit(_run_script("ncs_bridge.py", return_args))
     if tool == "chapter-commit":
         return_args = [*forward_args, "--chapter", str(args.chapter)]
         if args.review_result:
@@ -390,8 +425,12 @@ def main() -> None:
         raise SystemExit(_run_script("review_pipeline.py", return_args))
 
     if tool == "knowledge":
-        from .knowledge_query import KnowledgeQuery
-        from .cli_output import print_success
+        try:
+            from .knowledge_query import KnowledgeQuery
+            from .cli_output import print_success
+        except ImportError:  # pragma: no cover
+            from data_modules.knowledge_query import KnowledgeQuery
+            from data_modules.cli_output import print_success
         kq = KnowledgeQuery(project_root)
         if args.knowledge_action == "query-entity-state":
             result = kq.entity_state_at_chapter(args.entity, args.at_chapter)

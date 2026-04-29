@@ -46,3 +46,30 @@ def test_load_runtime_sources_prefers_latest_accepted_commit(tmp_path):
     assert snapshot.latest_accepted_commit["meta"]["status"] == "accepted"
     assert snapshot.primary_write_source == "chapter_commit"
     assert snapshot.fallback_sources == []
+
+
+def test_load_runtime_sources_accepts_no_contract_suffix(tmp_path):
+    story_root = tmp_path / ".story-system"
+    (story_root / "chapters").mkdir(parents=True, exist_ok=True)
+    (story_root / "volumes").mkdir(parents=True, exist_ok=True)
+    (story_root / "reviews").mkdir(parents=True, exist_ok=True)
+    (story_root / "commits").mkdir(parents=True, exist_ok=True)
+
+    (story_root / "MASTER_SETTING.json").write_text(
+        json.dumps({"title": "火影：血雾里走出的判忍"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (story_root / "chapters" / "chapter_001_contract.json").write_text(
+        json.dumps({"chapter_goal": "看见白的死劫"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (story_root / "volumes" / "volume_001.json").write_text(
+        json.dumps({"title": "血雾未散"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    snapshot = load_runtime_sources(tmp_path, chapter=1)
+
+    assert snapshot.contracts["chapter"]["chapter_goal"] == "看见白的死劫"
+    assert "missing_chapter_contract" not in snapshot.fallback_sources
+    assert "missing_review_contract" in snapshot.fallback_sources

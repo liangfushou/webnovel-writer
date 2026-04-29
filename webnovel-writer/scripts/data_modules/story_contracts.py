@@ -62,11 +62,25 @@ class StoryContractPaths:
     def chapter_json(self, chapter: int) -> Path:
         return self.chapters_dir / f"chapter_{chapter:03d}.json"
 
+    def chapter_json_candidates(self, chapter: int) -> List[Path]:
+        return [
+            self.chapter_json(chapter),
+            self.chapters_dir / f"chapter_{chapter:03d}_contract.json",
+            self.chapters_dir / f"chapter_{chapter:03d}.contract.json",
+        ]
+
     def volume_json(self, volume: int) -> Path:
         return self.volumes_dir / f"volume_{volume:03d}.json"
 
     def review_json(self, chapter: int) -> Path:
         return self.reviews_dir / f"chapter_{chapter:03d}.review.json"
+
+    def review_json_candidates(self, chapter: int) -> List[Path]:
+        return [
+            self.review_json(chapter),
+            self.reviews_dir / f"chapter_{chapter:03d}_review.json",
+            self.reviews_dir / f"chapter_{chapter:03d}.review_contract.json",
+        ]
 
     def commit_json(self, chapter: int) -> Path:
         return self.commits_dir / f"chapter_{chapter:03d}.commit.json"

@@ -319,7 +319,13 @@ class ContextManager:
         fallback = str(getattr(self.config, "context_genre_profile_fallback", "shuangwen") or "shuangwen")
         project = state.get("project") or {}
         project_info = state.get("project_info") or {}
-        genre_raw = str(project.get("genre") or project_info.get("genre") or fallback)
+        genre_raw = str(
+            project.get("genre")
+            or project_info.get("genre")
+            or state.get("book_genre")
+            or state.get("genre")
+            or fallback
+        )
         genres = self._parse_genre_tokens(genre_raw)
         if not genres:
             genres = [fallback]
@@ -375,11 +381,12 @@ class ContextManager:
             legacy_profile = dict(legacy_profile)
             legacy_profile["mode"] = "fallback_only"
 
+        master_setting = story_contract.get("master_setting") or {}
+        raw_master_genre = master_setting.get("genre") or ""
+        if isinstance(raw_master_genre, list):
+            raw_master_genre = "+".join(str(item) for item in raw_master_genre if str(item).strip())
         primary_genre = str(
-            (
-                ((story_contract.get("master_setting") or {}).get("route") or {}).get("primary_genre")
-                or ""
-            )
+            ((master_setting.get("route") or {}).get("primary_genre") or raw_master_genre or "")
         ).strip()
         if not primary_genre:
             return legacy_profile or {}

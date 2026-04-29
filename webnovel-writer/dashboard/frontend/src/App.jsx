@@ -3,8 +3,11 @@ import { NavLink, Outlet, useOutletContext } from 'react-router-dom'
 import { fetchProjectInfo, subscribeSSE } from './api.js'
 import {
     BookmarkIcon,
+    BookOpenIcon,
     ChartBarIcon,
+    ClipboardIcon,
     FolderIcon,
+    PackageIcon,
     SlidersIcon,
     TrendingUpIcon,
     UsersIcon,
@@ -18,6 +21,9 @@ const NAV_ITEMS = [
     { to: '/pacing', label: '节奏雷达', icon: TrendingUpIcon },
     { to: '/foreshadowing', label: '伏笔追踪', icon: BookmarkIcon },
     { to: '/files', label: '文档浏览', icon: FolderIcon },
+    { to: '/workflow', label: '写作流程', icon: ClipboardIcon },
+    { to: '/publish', label: '小说发布', icon: BookOpenIcon },
+    { to: '/export', label: '导出小说', icon: PackageIcon },
     { to: '/system', label: '系统状态', icon: SlidersIcon },
 ]
 
@@ -61,7 +67,7 @@ export default function App() {
         <div className="app-layout">
             <aside className="sidebar">
                 <div className="sidebar-header">
-                    <h1>PIXEL WRITER HUB</h1>
+                    <h1>像素写作台</h1>
                     <div className="subtitle" title={title}>{title}</div>
                 </div>
                 <nav className="sidebar-nav">

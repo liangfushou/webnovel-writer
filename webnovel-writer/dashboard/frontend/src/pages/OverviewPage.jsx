@@ -14,6 +14,7 @@ import {
     formatPercent,
     formatShortNumber,
 } from '../lib/format.js'
+import { formatHookStrength, formatStatus, formatStrand, formatUrgency } from '../lib/labels.js'
 import { groupChaptersByVolume } from '../lib/story.js'
 
 const WINDOW_SIZE = 50
@@ -50,9 +51,9 @@ function toneForUrgencyBadge(level) {
 function formatRuntimeText(runtimeHealth) {
     if (!runtimeHealth) return '运行态未加载'
     const fallback = Array.isArray(runtimeHealth.fallback_sources) && runtimeHealth.fallback_sources.length
-        ? runtimeHealth.fallback_sources.join(' / ')
-        : 'none'
-    return `${runtimeHealth.latest_commit_status || 'missing'} · fallback ${fallback}`
+        ? runtimeHealth.fallback_sources.map(formatStatus).join(' / ')
+        : '无'
+    return `最新提交：${formatStatus(runtimeHealth.latest_commit_status || 'missing')} · 降级来源：${fallback}`
 }
 
 function buildReviewOption(items) {
@@ -184,7 +185,7 @@ function RecentSummaryCard({ item }) {
                 <span className="summary-chapter">{formatChapterLabel(item.chapter)}</span>
                 <div className="summary-badges">
                     <Badge tone={toneForHookStrength(item.hook_strength)}>
-                        {item.hook_strength || '无钩子'}
+                        {formatHookStrength(item.hook_strength)}
                     </Badge>
                     {item.review_score ? <Badge tone="purple">{item.review_score} 分</Badge> : null}
                 </div>
@@ -331,7 +332,7 @@ export default function OverviewPage() {
         return [...counts.entries()]
             .filter(([, value]) => value > 0)
             .map(([key, value]) => ({
-                name: key,
+                name: formatStrand(key),
                 value,
                 itemStyle: {
                     color: STRAND_COLORS[key] || '#00b8d4',
@@ -365,8 +366,8 @@ export default function OverviewPage() {
                     sub={`目标 ${info.target_chapters || '—'} 章 · 卷 ${progress.current_volume || '—'}`}
                 />
                 <StatCard
-                    label="Story Runtime"
-                    value={runtimeHealth?.mainline_ready ? 'Mainline' : 'Fallback'}
+                    label="写作运行态"
+                    value={runtimeHealth?.mainline_ready ? '主线运行' : '降级运行'}
                     sub={formatRuntimeText(runtimeHealth)}
                     tone="plain"
                 />
@@ -385,7 +386,7 @@ export default function OverviewPage() {
             <article className="card">
                 <div className="card-header">
                     <div>
-                        <div className="section-label">REVIEW TREND</div>
+                        <div className="section-label">审查趋势</div>
                         <div className="card-title">审查得分趋势</div>
                     </div>
                     <Badge tone="green">
@@ -418,7 +419,7 @@ export default function OverviewPage() {
                 <article className="card">
                     <div className="card-header">
                         <div>
-                            <div className="section-label">WORD DISTRIBUTION</div>
+                            <div className="section-label">字数分布</div>
                             <div className="card-title">字数分布（按卷）</div>
                         </div>
                         <Badge tone="purple">{volumeGroups.length} 卷</Badge>
@@ -435,16 +436,16 @@ export default function OverviewPage() {
                 <article className="card">
                     <div className="card-header">
                         <div>
-                            <div className="section-label">STRAND OVERVIEW</div>
-                            <div className="card-title">Strand Weave 整体分布</div>
+                            <div className="section-label">叙事线概览</div>
+                            <div className="card-title">叙事线整体分布</div>
                         </div>
-                        <Badge tone="purple">{projectInfo?.strand_tracker?.current_dominant || 'unknown'}</Badge>
+                        <Badge tone="purple">{formatStrand(projectInfo?.strand_tracker?.current_dominant)}</Badge>
                     </div>
                     {strandEntries.length ? (
                         <ChartWrapper option={buildStrandOption(strandEntries)} height={260} />
                     ) : (
                         <div className="empty-state">
-                            <p>暂无 Strand 历史</p>
+                            <p>暂无叙事线历史</p>
                         </div>
                     )}
                 </article>
@@ -454,8 +455,8 @@ export default function OverviewPage() {
                 <article className="card">
                     <div className="card-header">
                         <div>
-                            <div className="section-label">FORESHADOWING</div>
-                            <div className="card-title">紧急伏笔 Top 5</div>
+                            <div className="section-label">伏笔预警</div>
+                            <div className="card-title">紧急伏笔前 5 条</div>
                         </div>
                         <Badge tone="amber">按紧急度排序</Badge>
                     </div>
@@ -480,7 +481,7 @@ export default function OverviewPage() {
                             {
                                 key: 'urgencyText',
                                 label: '紧急度',
-                                render: row => <Badge tone={toneForUrgencyBadge(row.urgencyText)}>{row.urgencyText}</Badge>,
+                                render: row => <Badge tone={toneForUrgencyBadge(row.urgencyText)}>{formatUrgency(row.urgencyText)}</Badge>,
                             },
                         ]}
                         rows={urgentRows}
@@ -494,7 +495,7 @@ export default function OverviewPage() {
                 <article className="card">
                     <div className="card-header">
                         <div>
-                            <div className="section-label">LATEST CHAPTERS</div>
+                            <div className="section-label">最近章节</div>
                             <div className="card-title">最近 3 章概要</div>
                         </div>
                         <Badge tone="cyan">{recentSummaries.length} 条</Badge>

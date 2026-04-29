@@ -12,10 +12,10 @@ class EventProjectionRouter:
         "relationship_changed": ["index", "vector"],
         "world_rule_revealed": ["memory", "vector"],
         "world_rule_broken": ["memory", "vector"],
-        "open_loop_created": ["memory"],
-        "open_loop_closed": ["memory"],
-        "promise_created": ["memory"],
-        "promise_paid_off": ["memory"],
+        "open_loop_created": ["state", "memory"],
+        "open_loop_closed": ["state", "memory"],
+        "promise_created": ["state", "memory"],
+        "promise_paid_off": ["state", "memory"],
         "artifact_obtained": ["index", "vector"],
     }
 
@@ -26,12 +26,17 @@ class EventProjectionRouter:
         writers: Set[str] = set()
         if str((commit_payload.get("meta") or {}).get("status") or "") == "accepted":
             writers.add("state")
-        if commit_payload.get("entity_deltas"):
+        if commit_payload.get("entity_deltas") or commit_payload.get("state_deltas"):
             writers.add("index")
         if str(commit_payload.get("summary_text") or "").strip():
             writers.add("summary")
+            writers.add("index")
+        if commit_payload.get("review_result"):
+            writers.add("index")
         for event in commit_payload.get("accepted_events") or []:
             if not isinstance(event, dict):
                 continue
             writers.update(self.route(event))
+            if str(event.get("event_type") or "").strip() == "relationship_changed":
+                writers.add("index")
         return sorted(writers)

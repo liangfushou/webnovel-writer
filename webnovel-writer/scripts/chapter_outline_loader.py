@@ -95,16 +95,30 @@ def _find_volume_outline_file(project_root: Path, chapter_num: int) -> Path | No
         outline_dir / f"第{volume_num}卷 - 详细大纲.md",
         outline_dir / f"第{volume_num}卷 详细大纲.md",
     ]
-    return next((path for path in candidates if path.exists()), None)
+    direct_match = next((path for path in candidates if path.exists()), None)
+    if direct_match is not None:
+        return direct_match
+
+    # No/NCS reference packages sometimes omit `progress.volumes_planned` and use
+    # non-50-chapter volume ranges. In that case, locate the volume by chapter
+    # headers instead of relying only on the default chapter-to-volume formula.
+    for path in sorted(outline_dir.glob("第*卷*详细大纲*.md")):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if re.search(rf"^##+\s*第\s*{chapter_num}\s*章(?:[：:\s]|$)", text, flags=re.MULTILINE):
+            return path
+    return None
 
 
 def _extract_outline_section(content: str, chapter_num: int) -> str | None:
     patterns = [
-        rf"###\s*第\s*{chapter_num}\s*章[：:]\s*(.+?)(?=###\s*第\s*\d+\s*章|##\s|$)",
-        rf"###\s*第{chapter_num}章[：:]\s*(.+?)(?=###\s*第\d+章|##\s|$)",
+        rf"^##+\s*第\s*{chapter_num}\s*章(?:[：:][^\n\r]*)?(?:\n|\r\n)(.*?)(?=^##+\s*第\s*\d+\s*章(?:[：:\s]|$)|\Z)",
+        rf"^##+\s*第{chapter_num}章(?:[：:][^\n\r]*)?(?:\n|\r\n)(.*?)(?=^##+\s*第\d+章(?:[：:\s]|$)|\Z)",
     ]
     for pattern in patterns:
-        match = re.search(pattern, content, re.DOTALL)
+        match = re.search(pattern, content, re.DOTALL | re.MULTILINE)
         if match:
             return match.group(0).strip()
     return None
