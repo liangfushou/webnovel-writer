@@ -1,4 +1,5 @@
 .claude/
+!.claude/settings.json
 
 # Python caches & virtualenv
 __pycache__/
@@ -11,6 +12,8 @@ venv/
 
 # Local runtime data
 .webnovel/
+.env
+.env.*
 
 # OS / editor
 .DS_Store

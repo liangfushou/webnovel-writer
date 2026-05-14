@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -X utf8 *)",
+      "Bash(python3 -X utf8 *)",
+      "Bash(PYTHONPATH=* python3 -X utf8 *)",
+      "Bash(PYTHONPATH=* python -X utf8 *)",
+      "Bash(WORKSPACE_ROOT=* python -X utf8 *)",
+      "Bash(WORKSPACE_ROOT=* PROJECT_ROOT=* python -X utf8 *)",
+      "Bash(PROJECT_ROOT=* python -X utf8 *)",
+      "Bash(wc -m *)",
+      "Bash(wc -c *)",
+      "Bash(wc -l *)",
+      "Bash(git add *)",
+      "Bash(git add .)",
+      "Bash(git -c i18n.commitEncoding=UTF-8 commit *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(sqlite3 *)"
+    ]
+  }
+}
