@@ -115,6 +115,11 @@ def find_chapter_file(project_root: Path, chapter_num: int) -> Optional[Path]:
     if not chapters_dir.exists():
         return None
 
+    # Prefer the canonical flat draft path (with title if outline has one).
+    canonical_flat = default_chapter_draft_path(project_root, chapter_num, use_volume_layout=False)
+    if canonical_flat.exists():
+        return canonical_flat
+
     legacy = chapters_dir / f"第{chapter_num:04d}章.md"
     if legacy.exists():
         return legacy
@@ -128,6 +133,11 @@ def find_chapter_file(project_root: Path, chapter_num: int) -> Optional[Path]:
 
     # Fallback: search anywhere under 正文/ (supports custom layouts)
     candidates = sorted(chapters_dir.rglob(f"第{chapter_num:03d}章*.md")) + sorted(chapters_dir.rglob(f"第{chapter_num:04d}章*.md"))
+    for c in candidates:
+        if c.is_file() and not re.search(r"-(?:保持原样|去AI味版|深度去AI味|gate修复版)\.md$", c.name):
+            return c
+
+    # As a last resort, allow any matching variant file.
     for c in candidates:
         if c.is_file():
             return c
@@ -152,4 +162,3 @@ def default_chapter_draft_path(project_root: Path, chapter_num: int, *, use_volu
         return vol_dir / _build_chapter_filename(project_root, chapter_num, use_volume_layout=True)
     else:
         return project_root / "正文" / _build_chapter_filename(project_root, chapter_num, use_volume_layout=False)
-

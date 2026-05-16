@@ -187,8 +187,9 @@ export default function ForeshadowingPage() {
             <div className="stat-grid">
                 <StatCard label="总伏笔" value={String(summary.total)} />
                 <StatCard label="活跃" value={String(summary.active)} tone="accent" />
+                <StatCard label="紧急" value={String(summary.urgent)} tone="accent" />
+                <StatCard label="超期" value={String(summary.overdue)} tone="accent" />
                 <StatCard label="已回收" value={String(summary.resolved)} tone="accent" />
-                <StatCard label="紧急 / 超期" value={String(summary.attention)} tone="accent" />
             </div>
 
             <div className="filter-group">
@@ -196,6 +197,11 @@ export default function ForeshadowingPage() {
                 <button type="button" className={`filter-btn ${filter === 'attention' ? 'active' : ''}`.trim()} onClick={() => setFilter('attention')}>紧急</button>
                 <button type="button" className={`filter-btn ${filter === 'active' ? 'active' : ''}`.trim()} onClick={() => setFilter('active')}>活跃</button>
                 <button type="button" className={`filter-btn ${filter === 'resolved' ? 'active' : ''}`.trim()} onClick={() => setFilter('resolved')}>已回收</button>
+            </div>
+
+            <div className="foreshadowing-hint">
+                <strong>超期</strong>表示目标章已经早于当前章，但伏笔状态仍不是“已回收/已完成/已解决”。
+                如果剧情里已经兑现，优先补写伏笔账状态；不要为了清红标临时改正文。
             </div>
 
             <article className="card">
@@ -225,7 +231,11 @@ export default function ForeshadowingPage() {
                         <div className="section-label">伏笔列表</div>
                         <div className="card-title">完整伏笔列表</div>
                     </div>
-                    <Badge tone="amber">{tableRows.length} 条</Badge>
+                    <div className="foreshadowing-badges">
+                        <Badge tone="red">超期 {summary.overdue}</Badge>
+                        <Badge tone="amber">紧急 {summary.urgent}</Badge>
+                        <Badge tone="blue">{tableRows.length} 条</Badge>
+                    </div>
                 </div>
                 <DataTable
                     columns={[

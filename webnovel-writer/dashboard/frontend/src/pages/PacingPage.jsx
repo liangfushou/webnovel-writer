@@ -10,6 +10,30 @@ import { formatStrand } from '../lib/labels.js'
 import { groupChaptersByVolume } from '../lib/story.js'
 
 const WINDOW_SIZE = 50
+const STRAND_KEYS = ['quest', 'fire', 'constellation', 'unknown']
+
+function normalizeStrand(value) {
+    const strand = String(value || '').trim().toLowerCase()
+    return STRAND_KEYS.includes(strand) && strand !== 'unknown' ? strand : 'unknown'
+}
+
+function formatChapterRanges(chapters) {
+    if (!chapters.length) return ''
+    const ranges = []
+    let start = chapters[0]
+    let previous = chapters[0]
+    for (const chapter of chapters.slice(1)) {
+        if (chapter === previous + 1) {
+            previous = chapter
+            continue
+        }
+        ranges.push(start === previous ? `第 ${start} 章` : `第 ${start}-${previous} 章`)
+        start = chapter
+        previous = chapter
+    }
+    ranges.push(start === previous ? `第 ${start} 章` : `第 ${start}-${previous} 章`)
+    return ranges.join('、')
+}
 
 function buildHookOption(items) {
     return {
@@ -59,9 +83,13 @@ function buildHookOption(items) {
 
 function buildStrandStackOption(items) {
     const chapters = items.map(item => item.chapter)
+    const normalizedItems = items.map(item => ({
+        ...item,
+        normalizedStrand: normalizeStrand(item.strand),
+    }))
     return {
         tooltip: { trigger: 'axis' },
-        legend: { bottom: 0, data: [formatStrand('quest'), formatStrand('fire'), formatStrand('constellation')] },
+        legend: { bottom: 0, data: STRAND_KEYS.map(formatStrand) },
         xAxis: {
             type: 'category',
             data: chapters,
@@ -72,42 +100,18 @@ function buildStrandStackOption(items) {
             max: 1,
             splitNumber: 1,
         },
-        series: [
-            {
-                name: formatStrand('quest'),
-                type: 'bar',
-                stack: 'strand',
-                data: items.map(item => (item.strand === 'quest' ? 1 : 0)),
-                barWidth: '64%',
-                itemStyle: {
-                    color: STRAND_COLORS.quest,
-                    borderColor: '#2a220f',
-                    borderWidth: 1,
-                },
+        series: STRAND_KEYS.map((strand, index) => ({
+            name: formatStrand(strand),
+            type: 'bar',
+            stack: 'strand',
+            data: normalizedItems.map(item => (item.normalizedStrand === strand ? 1 : 0)),
+            ...(index === 0 ? { barWidth: '64%' } : {}),
+            itemStyle: {
+                color: STRAND_COLORS[strand],
+                borderColor: '#2a220f',
+                borderWidth: 1,
             },
-            {
-                name: formatStrand('fire'),
-                type: 'bar',
-                stack: 'strand',
-                data: items.map(item => (item.strand === 'fire' ? 1 : 0)),
-                itemStyle: {
-                    color: STRAND_COLORS.fire,
-                    borderColor: '#2a220f',
-                    borderWidth: 1,
-                },
-            },
-            {
-                name: formatStrand('constellation'),
-                type: 'bar',
-                stack: 'strand',
-                data: items.map(item => (item.strand === 'constellation' ? 1 : 0)),
-                itemStyle: {
-                    color: STRAND_COLORS.constellation,
-                    borderColor: '#2a220f',
-                    borderWidth: 1,
-                },
-            },
-        ],
+        })),
     }
 }
 
@@ -219,6 +223,31 @@ export default function PacingPage() {
     )
     const currentStart = items[0]?.chapter || 0
     const currentEnd = items[items.length - 1]?.chapter || 0
+    const missingChapters = useMemo(() => {
+        if (!currentStart || !currentEnd) return []
+        const existingChapters = new Set(items.map(item => Number(item.chapter)).filter(Boolean))
+        const missing = []
+        for (let chapter = currentStart; chapter <= currentEnd; chapter += 1) {
+            if (!existingChapters.has(chapter)) {
+                missing.push(chapter)
+            }
+        }
+        return missing
+    }, [currentEnd, currentStart, items])
+    const missingChapterText = useMemo(() => formatChapterRanges(missingChapters), [missingChapters])
+    const strandSummary = useMemo(() => {
+        return items.reduce(
+            (summary, item) => {
+                summary[normalizeStrand(item.strand)] += 1
+                return summary
+            },
+            { quest: 0, fire: 0, constellation: 0, unknown: 0 },
+        )
+    }, [items])
+    const inferredStrandCount = useMemo(
+        () => items.filter(item => item.strand_source === 'inferred').length,
+        [items],
+    )
 
     return (
         <section className="dashboard-page">
@@ -249,6 +278,14 @@ export default function PacingPage() {
                     sub={`最新章节 ${formatChapterLabel(windowPayload.latest_chapter)}`}
                 />
             </div>
+
+            {missingChapters.length ? (
+                <div className="dashboard-hint">
+                    <strong>章节数据缺口</strong>
+                    当前窗口跨度是 {formatChapterLabel(currentStart)} - {formatChapterLabel(currentEnd)}，
+                    但索引里缺少 {missingChapterText}。补齐这些章节的提交/索引后，逐章图才会完整。
+                </div>
+            ) : null}
 
             <article className="card">
                 <div className="card-header">
@@ -289,8 +326,24 @@ export default function PacingPage() {
                             <div className="section-label">叙事线堆叠</div>
                             <div className="card-title">叙事线分布（逐章）</div>
                         </div>
-                        <Badge tone="purple">堆叠柱状图</Badge>
+                        <div className="header-badges">
+                            <Badge tone="blue">{formatStrand('quest')} {strandSummary.quest}</Badge>
+                            <Badge tone="red">{formatStrand('fire')} {strandSummary.fire}</Badge>
+                            <Badge tone="purple">{formatStrand('constellation')} {strandSummary.constellation}</Badge>
+                            <Badge tone="amber">{formatStrand('unknown')} {strandSummary.unknown}</Badge>
+                        </div>
                     </div>
+                    {strandSummary.unknown ? (
+                        <div className="dashboard-hint">
+                            <strong>未识别</strong>表示该章没有写入 `strand_tracker.history`。
+                            现在图表只代表“叙事线标注情况”，不是正文质量判断；补齐章节提交或叙事线标签后才适合看分布比例。
+                        </div>
+                    ) : inferredStrandCount ? (
+                        <div className="dashboard-hint">
+                            <strong>自动推断</strong>当前有 {inferredStrandCount} 章没有正式叙事线标签，
+                            已根据标题、摘要和 hook 类型临时归入目标线/冲突线/群像线；写入 `strand_tracker.history` 后会优先使用正式标签。
+                        </div>
+                    ) : null}
                     {items.length ? (
                         <ChartWrapper option={buildStrandStackOption(items)} />
                     ) : (

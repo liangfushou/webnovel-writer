@@ -129,8 +129,14 @@ export function summarizeForeshadowing(records) {
             if (record.level === 'urgent' || record.level === 'overdue') {
                 summary.attention += 1
             }
+            if (record.level === 'urgent') {
+                summary.urgent += 1
+            }
+            if (record.level === 'overdue') {
+                summary.overdue += 1
+            }
             return summary
         },
-        { total: 0, active: 0, resolved: 0, attention: 0 },
+        { total: 0, active: 0, resolved: 0, attention: 0, urgent: 0, overdue: 0 },
     )
 }

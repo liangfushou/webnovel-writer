@@ -100,6 +100,22 @@ def _volume_for_chapter(state: dict[str, Any], chapter: int) -> int:
     return max(1, (chapter - 1) // 50 + 1)
 
 
+def _route_cutover_invalidates_previous_artifacts(state: dict[str, Any], chapter: int) -> bool:
+    text = "\n".join(
+        str(state.get(key) or "")
+        for key in ("current_focus", "next_action", "notes")
+    )
+    if "B路线" not in text:
+        return False
+    if "旧第" not in text or "不再" not in text:
+        return False
+    match = re.search(r"旧第\s*(\d+)\s*[-—至到]\s*(\d+)\s*章", text)
+    if not match:
+        return False
+    start, end = int(match.group(1)), int(match.group(2))
+    return start <= chapter <= end
+
+
 def _volume_from_outline_headers(project_root: Path, chapter: int) -> int | None:
     outline_dir = project_root / "大纲"
     if not outline_dir.is_dir():
@@ -129,24 +145,56 @@ def _outline_files(project_root: Path, volume: int) -> list[Path]:
     outline_dir = project_root / "大纲"
     if not outline_dir.is_dir():
         return []
-    preferred_patterns = [
+    volume_patterns = [
+        f"*第{volume}章开屏钩子*.md",
+        f"*第{volume:04d}章开屏钩子*.md",
         f"*第{volume}卷*时间线*.md",
         f"*第{volume:03d}卷*时间线*.md",
         f"*{volume}卷*时间线*.md",
         f"*第{volume}卷*节拍*.md",
         f"*第{volume:03d}卷*节拍*.md",
         f"*{volume}卷*节拍*.md",
+        f"*第{volume}卷*伏笔*.md",
+        f"*第{volume:03d}卷*伏笔*.md",
+        f"*{volume}卷*伏笔*.md",
         f"*第{volume}卷*详细大纲*.md",
         f"*第{volume:03d}卷*详细大纲*.md",
         f"*{volume}卷*详细*.md",
+    ]
+    fallback_patterns = [
         "*时间线*.md",
         "*节拍*.md",
+        "*伏笔*.md",
         "*详细大纲*.md",
         "*章纲*.md",
     ]
+
+    def collect(patterns: list[str]) -> list[Path]:
+        seen: set[Path] = set()
+        result: list[Path] = []
+        for pattern in patterns:
+            for path in sorted(outline_dir.glob(pattern)):
+                file_volume = re.search(r"第(\d+)卷", path.name)
+                if file_volume and int(file_volume.group(1)) != volume:
+                    continue
+                if path not in seen and path.is_file():
+                    seen.add(path)
+                    result.append(path)
+        return result
+
+    result = collect(volume_patterns)
+    if result:
+        return result
+    return collect(fallback_patterns)
+
+
+def _outline_files_legacy(project_root: Path, volume: int) -> list[Path]:
+    outline_dir = project_root / "大纲"
+    if not outline_dir.is_dir():
+        return []
     seen: set[Path] = set()
     result: list[Path] = []
-    for pattern in preferred_patterns:
+    for pattern in ("*时间线*.md", "*节拍*.md", "*伏笔*.md", "*详细大纲*.md", "*章纲*.md"):
         for path in sorted(outline_dir.glob(pattern)):
             file_volume = re.search(r"第(\d+)卷", path.name)
             if file_volume and int(file_volume.group(1)) != volume:
@@ -182,6 +230,45 @@ def _latest_files(directory: Path, pattern: str, limit: int) -> list[Path]:
     if not directory.is_dir():
         return []
     return sorted(directory.glob(pattern), key=lambda p: p.name)[-limit:]
+
+
+def _chapter_number_from_path(path: Path) -> int | None:
+    name = path.name
+    patterns = (
+        r"ch(?:apter)?[_-]?0*(\d+)",
+        r"第0*(\d+)章",
+        r"^0*(\d+)[-_]",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, name, flags=re.IGNORECASE)
+        if match:
+            try:
+                return int(match.group(1))
+            except ValueError:
+                return None
+    return None
+
+
+def _chapter_status(state: dict[str, Any], chapter: int) -> str:
+    progress = state.get("progress") or {}
+    chapter_status = progress.get("chapter_status") or {}
+    if isinstance(chapter_status, dict):
+        return str(chapter_status.get(str(chapter)) or chapter_status.get(chapter) or "")
+    return ""
+
+
+def _latest_files_before_chapter(directory: Path, pattern: str, chapter: int, limit: int, state: dict[str, Any] | None = None) -> list[Path]:
+    if not directory.is_dir() or limit <= 0:
+        return []
+    numbered: list[tuple[int, str, Path]] = []
+    for path in directory.glob(pattern):
+        number = _chapter_number_from_path(path)
+        if number is None or number >= chapter:
+            continue
+        if state is not None and "rewrite_pending_old_route_invalid" in _chapter_status(state, number):
+            continue
+        numbered.append((number, path.name, path))
+    return [path for _, _, path in sorted(numbered)[-limit:]]
 
 
 def _read_joined(paths: list[Path], *, empty: str = "（暂无）") -> str:
@@ -398,20 +485,34 @@ def _render_project_overview(project_root: Path, state: dict[str, Any]) -> str:
     total_chapters = info.get("target_chapters") or ""
     idea_bank = _read_json(project_root / ".webnovel" / "idea_bank.json")
     outline = _read_text(project_root / "大纲" / "总纲.md")
-    fanfic_plans = _read_joined(
-        [
-            path for path in (
-                project_root / "大纲" / "同人爽点模型.md",
-                project_root / "大纲" / "遗憾改写清单.md",
-                project_root / "大纲" / "竞品观察与避坑卡.md",
-                project_root / "大纲" / "黄金三章作战卡.md",
-                project_root / "大纲" / "原作事件保留表.md",
-                project_root / "大纲" / "原作人物交互规划.md",
-            )
-            if path.is_file()
-        ],
-        empty="（暂无同人专项规划）",
-    )
+    if str(state.get("current_stage") or "") == "rewrite_cutover":
+        fanfic_plans = _read_joined(
+            [
+                path for path in (
+                    project_root / "大纲" / "开头三章简介.md",
+                    project_root / "大纲" / "黄金三章作战卡.md",
+                    project_root / "大纲" / "B路线伏笔总表.md",
+                    project_root / "大纲" / "竞品观察与避坑卡.md",
+                )
+                if path.is_file()
+            ],
+            empty="B路线重写切换中：以总纲、第1卷详细大纲、黄金三章作战卡和B路线伏笔为准。",
+        )
+    else:
+        fanfic_plans = _read_joined(
+            [
+                path for path in (
+                    project_root / "大纲" / "同人爽点模型.md",
+                    project_root / "大纲" / "遗憾改写清单.md",
+                    project_root / "大纲" / "竞品观察与避坑卡.md",
+                    project_root / "大纲" / "黄金三章作战卡.md",
+                    project_root / "大纲" / "原作事件保留表.md",
+                    project_root / "大纲" / "原作人物交互规划.md",
+                )
+                if path.is_file()
+            ],
+            empty="（暂无同人专项规划）",
+        )
     return f"""# 项目概览
 
 **项目名称**: {info.get("title") or project_root.name}
@@ -456,29 +557,38 @@ def _render_theme(state: dict[str, Any]) -> str:
 """
 
 
-def _render_worldbuilding(project_root: Path) -> str:
-    worldview = _read_text(project_root / "设定集" / "世界观.md")
-    power = _read_text(project_root / "设定集" / "力量体系.md")
-    extra = _read_joined(sorted((project_root / "设定集" / "其他设定").glob("*.md")) if (project_root / "设定集" / "其他设定").is_dir() else [])
-    lifecycle = _read_text(project_root / "设定集" / "技能物品时间线.md")
-    skill_cards = _read_joined(sorted((project_root / "设定集" / "技能卡").glob("*.md")) if (project_root / "设定集" / "技能卡").is_dir() else [], empty="（暂无技能卡/招式库）")
-    item_cards = _read_joined(sorted((project_root / "设定集" / "物品库").glob("*.md")) if (project_root / "设定集" / "物品库").is_dir() else [], empty="（暂无物品卡/道具库）")
-    fanfic_constraints = _read_joined(
-        [
-            path for path in (
-                project_root / "设定集" / "原作设定卡.md",
-                project_root / "设定集" / "原作时间线.md",
-                project_root / "设定集" / "同人分歧点.md",
-                project_root / "设定集" / "改写边界.md",
-                project_root / "设定集" / "OOC禁区.md",
-                project_root / "设定集" / "平台风格约束.md",
-                project_root / "设定集" / "原作人物交互规划.md",
-                project_root / "设定集" / "CP与感情线规则.md",
-            )
-            if path.is_file()
-        ],
-        empty="（暂无同人/原作约束）",
-    )
+def _render_worldbuilding(project_root: Path, state: dict[str, Any], chapter: int) -> str:
+    if _route_cutover_invalidates_previous_artifacts(state, chapter):
+        worldview = "B路线重写切换中：当前主场从大蛇丸地下实验室、木叶边缘暗巷、中忍考试外围起步。旧开局世界观卡暂不注入 bridge。"
+        power = "死劫改命系统：通过右眼提示当前死劫、命运死劫和奖励结算；改写死劫获得死劫点与忍道词条。系统不是全知剧透器，不送满级血继；关键使用会导致右眼流血、短暂失明、误判风险，并被大蛇丸或根部定位。"
+        extra = "（B路线重写切换中：旧设定补充暂不注入 bridge，避免旧开局回流。）"
+        lifecycle = "（B路线第1章尚未提交：旧技能物品时间线暂不注入 bridge；新正文提交后逐章重建。）"
+        skill_cards = "（B路线第1章尚未提交：旧技能卡暂不批量注入 bridge；只使用死劫改命系统、忍道词条、当前章大纲、state.entity_state 与主角核心能力。）"
+        item_cards = "（B路线第1章尚未提交：旧物品卡暂不批量注入 bridge；第1章可用物品以实验台束缚带、大蛇丸血样管、眼部查克拉记录、团藏密件等当前章大纲物品为准。）"
+        fanfic_constraints = "B路线约束：大蛇丸、团藏、佐助前三章入场；第1章必须挖眼失败并炸蛇窟逃生；不得把旧开局支线当作前30章主卖点。"
+    else:
+        worldview = _read_text(project_root / "设定集" / "世界观.md")
+        power = _read_text(project_root / "设定集" / "力量体系.md")
+        extra = _read_joined(sorted((project_root / "设定集" / "其他设定").glob("*.md")) if (project_root / "设定集" / "其他设定").is_dir() else [])
+        lifecycle = _read_text(project_root / "设定集" / "技能物品时间线.md")
+        skill_cards = _read_joined(sorted((project_root / "设定集" / "技能卡").glob("*.md")) if (project_root / "设定集" / "技能卡").is_dir() else [], empty="（暂无技能卡/招式库）")
+        item_cards = _read_joined(sorted((project_root / "设定集" / "物品库").glob("*.md")) if (project_root / "设定集" / "物品库").is_dir() else [], empty="（暂无物品卡/道具库）")
+        fanfic_constraints = _read_joined(
+            [
+                path for path in (
+                    project_root / "设定集" / "原作设定卡.md",
+                    project_root / "设定集" / "原作时间线.md",
+                    project_root / "设定集" / "同人分歧点.md",
+                    project_root / "设定集" / "改写边界.md",
+                    project_root / "设定集" / "OOC禁区.md",
+                    project_root / "设定集" / "平台风格约束.md",
+                    project_root / "设定集" / "原作人物交互规划.md",
+                    project_root / "设定集" / "CP与感情线规则.md",
+                )
+                if path.is_file()
+            ],
+            empty="（暂无同人/原作约束）",
+        )
     return f"""# 世界设定
 
 ## 世界观
@@ -511,20 +621,29 @@ def _render_worldbuilding(project_root: Path) -> str:
 """
 
 
-def _render_cast_bible(project_root: Path, state: dict[str, Any]) -> str:
-    protagonist = _read_text(project_root / "设定集" / "主角卡.md")
-    heroine = _read_text(project_root / "设定集" / "女主卡.md")
-    team = _read_text(project_root / "设定集" / "主角组.md")
-    antagonist = _read_text(project_root / "设定集" / "反派设计.md")
+def _render_cast_bible(project_root: Path, state: dict[str, Any], chapter: int) -> str:
+    if _route_cutover_invalidates_previous_artifacts(state, chapter):
+        protagonist = "雾原朔：现代穿越者，大蛇丸实验体逃杀线主角，死劫改命系统宿主；知道火影主要大事件，但被自己改动后的新死局会变形，不能靠完整剧情剧透速通。"
+        heroine = "B路线前期无恋爱主卖点，感情线不得压过大蛇丸、团藏、佐助和中忍考试。"
+        team = "前期关系核心：雾原朔与佐助是证据交易，不是信任；鸣人用行动介入但不能提前成熟；卡卡西观察边界。"
+        antagonist = "卷一压迫源：大蛇丸挖眼与回收数据，团藏根部接收并封存实验体，音忍与根部围猎。"
+    else:
+        protagonist = _read_text(project_root / "设定集" / "主角卡.md")
+        heroine = _read_text(project_root / "设定集" / "女主卡.md")
+        team = _read_text(project_root / "设定集" / "主角组.md")
+        antagonist = _read_text(project_root / "设定集" / "反派设计.md")
     character_dirs = [
         project_root / "设定集" / "角色库" / "主要角色",
         project_root / "设定集" / "角色库" / "次要角色",
         project_root / "设定集" / "角色库" / "反派角色",
     ]
-    library_chunks: list[str] = []
-    for directory in character_dirs:
-        library_chunks.append(_read_joined(sorted(directory.glob("*.md")) if directory.is_dir() else [], empty=""))
-    library = "\n\n".join(chunk for chunk in library_chunks if chunk.strip()) or "（暂无角色库条目）"
+    if _route_cutover_invalidates_previous_artifacts(state, chapter):
+        library = "（B路线重写切换中：旧角色库暂不批量注入 bridge。当前章人物以大纲/第1卷-详细大纲.md 与 state.entity_state 为准。）"
+    else:
+        library_chunks: list[str] = []
+        for directory in character_dirs:
+            library_chunks.append(_read_joined(sorted(directory.glob("*.md")) if directory.is_dir() else [], empty=""))
+        library = "\n\n".join(chunk for chunk in library_chunks if chunk.strip()) or "（暂无角色库条目）"
     return f"""# 角色圣经
 
 ## 主角
@@ -552,6 +671,12 @@ def _render_cast_bible(project_root: Path, state: dict[str, Any]) -> str:
 ```json
 {_dump_json(state.get("protagonist_state") or {})}
 ```
+
+## B路线运行态人物
+
+```json
+{_dump_json(state.get("entity_state") or {})}
+```
 """
 
 
@@ -573,7 +698,7 @@ def _render_relationship_map(state: dict[str, Any]) -> str:
 def _render_plotlines(project_root: Path, state: dict[str, Any], chapter: int, volume: int) -> str:
     outline = _read_text(project_root / "大纲" / "总纲.md")
     volume_outlines = _read_joined(_outline_files(project_root, volume), empty="（暂无卷详细大纲/章纲）")
-    summaries = _read_joined(_latest_files(project_root / ".webnovel" / "summaries", "*.md", 5), empty="（暂无章节摘要）")
+    summaries = _read_joined(_latest_files_before_chapter(project_root / ".webnovel" / "summaries", "*.md", chapter, 5, state), empty="（暂无章节摘要）")
     threads = (state.get("plot_threads") or {})
     return f"""# 主要情节线
 
@@ -674,9 +799,15 @@ def _render_dynamic_state(project_root: Path, state: dict[str, Any], chapter: in
     progress = state.get("progress") or {}
     completed_chapter = progress.get("current_chapter") or state.get("current_chapter") or state.get("last_completed_chapter") or 0
     total_words = progress.get("total_words") or state.get("total_words") or 0
-    summaries = _read_joined(_latest_files(project_root / ".webnovel" / "summaries", "*.md", 5), empty="（暂无）")
-    state_changes = _read_joined(_latest_files(project_root / ".story-system" / "events", "*.events.json", 5), empty="（暂无）")
-    index_snapshot = _read_index_snapshot(project_root, chapter)
+    summaries = _read_joined(_latest_files_before_chapter(project_root / ".webnovel" / "summaries", "*.md", chapter, 5, state), empty="（暂无）")
+    state_changes = _read_joined(_latest_files_before_chapter(project_root / ".story-system" / "events", "*.events.json", chapter, 5, state), empty="（暂无）")
+    if _route_cutover_invalidates_previous_artifacts(state, chapter):
+        index_snapshot = {
+            "note": "B路线重写切换中：旧 index.db 投影暂不注入 bridge，避免旧正文事实回流；新第1章提交后重建。",
+            "foreshadows": ((state.get("plot_threads") or {}).get("foreshadowing") or []),
+        }
+    else:
+        index_snapshot = _read_index_snapshot(project_root, chapter)
     knowledge_files = _read_knowledge_files(project_root)
     return f"""# 动态状态
 
@@ -715,7 +846,10 @@ def _render_dynamic_state(project_root: Path, state: dict[str, Any], chapter: in
 
 def _render_style_guide(project_root: Path, state: dict[str, Any], master_payload: Any, anti_patterns: Any) -> str:
     style_source = _read_text(project_root / "设定集" / "复合题材-融合逻辑.md")
-    power = _read_text(project_root / "设定集" / "力量体系.md")
+    if str(state.get("current_stage") or "") == "rewrite_cutover":
+        power = "死劫改命系统：通过右眼载体提示当前死劫、命运死劫和结算奖励；不是全知剧透器，不送满级血继。忍道词条只提供本土化能力增益，必须有槽位、反噬、暴露或因果追踪代价；每章必须以动作兑现结果。"
+    else:
+        power = _read_text(project_root / "设定集" / "力量体系.md")
     return f"""# 风格指南
 
 ## 段落模式
@@ -744,14 +878,24 @@ web-serial-natural
 """
 
 
-def _copy_recent_chapters(project_root: Path, bridge_dir: Path, limit: int) -> None:
+def _copy_recent_chapters(project_root: Path, bridge_dir: Path, limit: int, target_chapter: int, state: dict[str, Any]) -> None:
     chapters_dir = project_root / "正文"
     target_dir = bridge_dir / "chapters"
+    if target_dir.exists():
+        shutil.rmtree(target_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
     if not chapters_dir.is_dir() or limit <= 0:
         return
-    candidates = sorted(chapters_dir.glob("*.md"))[-limit:]
-    for index, path in enumerate(candidates, start=1):
+    candidates: list[tuple[int, str, Path]] = []
+    for path in chapters_dir.glob("*.md"):
+        number = _chapter_number_from_path(path)
+        if number is None or number >= target_chapter:
+            continue
+        status = _chapter_status(state, number)
+        if "rewrite_pending_old_route_invalid" in status:
+            continue
+        candidates.append((number, path.name, path))
+    for index, (_, _, path) in enumerate(sorted(candidates)[-limit:], start=1):
         safe_name = re.sub(r"^第0*(\d+)章[-_ ]*", r"\1-", path.name)
         if not re.match(r"^\d+", safe_name):
             safe_name = f"ref-{index:02d}-{path.name}"
@@ -815,21 +959,32 @@ def build_bridge(project_root: Path, *, chapter: int | None, output_dir: Path | 
     target_chapter = _chapter_arg(state, chapter)
     volume = _volume_from_outline_headers(project_root, target_chapter) or _volume_for_chapter(state, target_chapter)
     bridge_dir = output_dir or (project_root / ".webnovel" / "tmp" / "ncs-bridge")
+    if bridge_dir.exists():
+        shutil.rmtree(bridge_dir)
     bridge_dir.mkdir(parents=True, exist_ok=True)
     (bridge_dir / "control-cards").mkdir(parents=True, exist_ok=True)
     (bridge_dir / "logs").mkdir(parents=True, exist_ok=True)
 
-    master_payload = _story_json(project_root, "master")
     anti_patterns = _story_json(project_root, "anti")
-    chapter_payload = _story_json(project_root, "chapter", chapter=target_chapter)
-    review_payload = _story_json(project_root, "review", chapter=target_chapter)
+    previous_artifacts_invalid = _route_cutover_invalidates_previous_artifacts(state, target_chapter)
+    master_payload = _story_json(project_root, "master")
+    if previous_artifacts_invalid:
+        if master_payload is None:
+            master_payload = {
+                "note": "B路线重写切换中：未找到新版 MASTER_SETTING；以当前总纲、卷纲、state 和章节摘录为准。"
+            }
+        chapter_payload = None
+        review_payload = None
+    else:
+        chapter_payload = _story_json(project_root, "chapter", chapter=target_chapter)
+        review_payload = _story_json(project_root, "review", chapter=target_chapter)
     chapter_outline = _chapter_outline_section(project_root, target_chapter, volume)
 
     files: dict[str, str] = {
         "00-project-overview.md": _render_project_overview(project_root, state),
         "01-theme-and-proposition.md": _render_theme(state),
-        "02-worldbuilding.md": _render_worldbuilding(project_root),
-        "03-cast-bible.md": _render_cast_bible(project_root, state),
+        "02-worldbuilding.md": _render_worldbuilding(project_root, state, target_chapter),
+        "03-cast-bible.md": _render_cast_bible(project_root, state, target_chapter),
         "04-relationship-map.md": _render_relationship_map(state),
         "05-main-plotlines.md": _render_plotlines(project_root, state, target_chapter, volume),
         "06-foreshadow-ledger.md": _render_foreshadow(project_root, state, chapter_payload, review_payload),
@@ -846,7 +1001,7 @@ def build_bridge(project_root: Path, *, chapter: int | None, output_dir: Path | 
     control_name = f"{target_chapter:02d}-control-card.md"
     _write_text(bridge_dir / "control-cards" / control_name, _render_control_card(target_chapter, volume, chapter_payload, review_payload, chapter_outline))
     written.append(f"control-cards/{control_name}")
-    _copy_recent_chapters(project_root, bridge_dir, recent_chapters)
+    _copy_recent_chapters(project_root, bridge_dir, recent_chapters, target_chapter, state)
 
     manifest = {
         "schema_version": 1,

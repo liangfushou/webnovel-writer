@@ -12,6 +12,7 @@ FastAPI 可调用的同步接口，并提供后台任务管理与进度跟踪。
 
 import asyncio
 import atexit
+import re
 import sys
 import threading
 import time
@@ -184,21 +185,40 @@ def check_playwright() -> Dict[str, Any]:
 
 def check_login_status() -> Dict[str, Any]:
     """检查番茄小说登录状态。"""
-    from publisher.auth import (
-        check_auth_state,
-        get_default_auth_state_path,
-    )
+    cli_command = f"python {(_scripts_root_path / 'publish_manager.py')} setup-browser"
+    try:
+        from publisher.auth import (
+            check_auth_state,
+            get_default_auth_state_path,
+        )
+    except ImportError as e:
+        auth_path = Path.home() / ".opencode" / "fanqie_auth_state.json"
+        return {
+            "logged_in": False,
+            "auth_state_path": str(auth_path),
+            "cli_command": cli_command,
+            "error": f"发布依赖未安装: {e}",
+        }
+
     auth_path = get_default_auth_state_path()
     is_logged_in = check_auth_state(auth_path)
     return {
         "logged_in": is_logged_in,
         "auth_state_path": str(auth_path),
-        "cli_command": f"python {(_scripts_root_path / 'publish_manager.py')} setup-browser",
+        "cli_command": cli_command,
     }
 
 
 def setup_browser() -> str:
     """创建后台登录配置任务，打开浏览器供用户手动登录。"""
+    if not check_playwright()["available"]:
+        task_id = str(uuid.uuid4())[:8]
+        task = _task_store.create(task_id)
+        task.status = TaskStatus.FAILED
+        task.message = "Playwright 未安装，请先安装发布依赖。"
+        _task_store.add_log(task_id, "ERROR: 缺少 playwright，无法打开番茄登录浏览器。")
+        return task_id
+
     from publish_manager import cmd_setup_browser
 
     _close_pm_instance()
@@ -264,6 +284,29 @@ def create_book(
 def get_remote_chapters(project_root: Path, book_id: str) -> List[Dict[str, Any]]:
     """获取番茄平台上的章节列表（已发布+草稿）。"""
     pm = _get_publish_manager(project_root)
+
+    def _chapter_sort_key(item: Dict[str, Any]) -> tuple[int, int, str]:
+        for key in ("chapter", "chapter_number", "chapter_no", "chapter_index", "index"):
+            try:
+                value = int(item.get(key) or 0)
+                if value > 0:
+                    return (0, value, str(item.get("title") or ""))
+            except (TypeError, ValueError):
+                pass
+        title = str(
+            item.get("title")
+            or item.get("chapter_title")
+            or item.get("item_title")
+            or item.get("article_title")
+            or item.get("item_name")
+            or item.get("chapter_name")
+            or item.get("name")
+            or ""
+        )
+        match = re.search(r"第\s*(\d+)\s*章", title)
+        if match:
+            return (0, int(match.group(1)), title)
+        return (1, 0, title)
     
     async def _fetch():
         client = await pm._ensure_client()
@@ -275,14 +318,25 @@ def get_remote_chapters(project_root: Path, book_id: str) -> List[Dict[str, Any]
         
         seen_ids = set()
         merged = []
-        for ch in published + drafts:
+        for ch in published:
+            item = dict(ch)
+            item.setdefault("source", "published")
+            item_id = item.get("item_id", "")
+            if item_id and item_id not in seen_ids:
+                seen_ids.add(item_id)
+                merged.append(item)
+            elif not item_id:
+                merged.append(item)
+        for ch in drafts:
+            item = dict(ch)
+            item.setdefault("source", "draft")
             item_id = ch.get("item_id", "")
             if item_id and item_id not in seen_ids:
                 seen_ids.add(item_id)
-                merged.append(ch)
+                merged.append(item)
             elif not item_id:
-                merged.append(ch)
-        return merged
+                merged.append(item)
+        return sorted(merged, key=_chapter_sort_key)
     
     try:
         return _run_async(_fetch())
@@ -307,12 +361,23 @@ def publish_chapters(
         try:
             _task_store.add_log(task_id, "正在加载章节…")
             chapters = pm.load_chapters(range_spec)
+            chapters = sorted(chapters, key=lambda item: int(item.get("chapter_number") or 0))
             task.total = len(chapters)
             _task_store.add_log(task_id, f"找到 {len(chapters)} 个章节")
 
             if not chapters:
                 _task_store.update(task_id, status=TaskStatus.FAILED, message="没有可发布的章节")
                 return
+
+            upload_order = "、".join(
+                f"第{int(ch.get('chapter_number') or 0)}章"
+                for ch in chapters
+                if int(ch.get("chapter_number") or 0) > 0
+            )
+            if upload_order:
+                _task_store.add_log(task_id, f"实际上传顺序：{upload_order}")
+            if publish_mode == "draft" and len(chapters) > 1:
+                _task_store.add_log(task_id, "草稿模式将按章间隔保存，避免番茄同秒修改导致草稿箱中间乱序。")
 
             _task_store.add_log(task_id, "正在连接番茄小说…")
             _task_store.update(task_id, message="正在连接番茄小说…")

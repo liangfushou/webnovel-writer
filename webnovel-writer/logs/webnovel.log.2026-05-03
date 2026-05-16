@@ -1,0 +1,30 @@
+2026-05-03 01:03:03 [DEBUG] asyncio: Using selector: KqueueSelector
+2026-05-03 01:03:04 [INFO] publisher.browser: 使用已保存的登录状态启动浏览器: /Users/liangfushou/.opencode/fanqie_auth_state.json
+2026-05-03 01:03:06 [INFO] publisher.browser: 浏览器启动成功 (headless=False, storage_state=True)
+2026-05-03 01:03:06 [INFO] publisher.auth: 正在导航到番茄作家后台: https://fanqienovel.com/main/writer/?enter_from=author_zone
+2026-05-03 01:03:11 [INFO] publisher.auth: 已登录（URL: https://fanqienovel.com/main/writer/?enter_from=author_zone）
+2026-05-03 01:03:11 [INFO] publisher.auth: 登录状态已保存到: /Users/liangfushou/.opencode/fanqie_auth_state.json
+2026-05-03 01:03:12 [DEBUG] publisher.fanqie_client: GET /api/author/homepage/book_list/v0/ → HTTP 200  body='{"code":0,"data":{"author_risk":1,"book_list":[{"abstract":"波之国大桥上，白即将替再不斩挡下雷切。所有人都以为，这就是他的命。只有雾原朔看见了那条死线。他不是穿越者，没有系统，也不知道完整剧情。他只是血雾时代活下来的判忍，凭一双“死劫之眼”，看见别人最接近死亡的瞬间。于是，白没死。再不斩没死。卡多被清算。波之国的结局，从这一刻彻底偏离原著'
+2026-05-03 01:03:12 [DEBUG] publisher.fanqie_client: GET /api/author/chapter/chapter_list/v1 → HTTP 200  body='{"code":0,"data":{"total_count":6,"total_fail_count":0,"book_genre":0,"item_list":[{"item_id":"7635178608322953753","volume_id":"7634607480890215449","index":6,"title":"第 6 章 再不斩不欠他了","recommend_title'
+2026-05-03 01:03:12 [DEBUG] publisher.fanqie_client: GET /api/author/chapter/draft_list/v1/ → HTTP 200  body='{"code":0,"data":{"total_count":0,"draft_list":[],"book_status":1,"creation_status":1,"book_write_extra_permission":0,"book_extra_word_number":0},"log_id":"202605030103124C6E6FB466D1FD3A1140","message'
+2026-05-03 01:03:39 [DEBUG] publisher.fanqie_client: GET /api/author/volume/volume_list/v1/ → HTTP 200  body='{"code":0,"data":{"volume_list":[{"index":1,"book_id":"7634607479384460313","volume_id":"7634607480890215449","volume_name":"第一卷：血雾未散","item_count":6,"can_delete":false}]},"log_id":"202605030103395C45'
+2026-05-03 01:03:39 [INFO] publisher.fanqie_client: 开始上传 3 章到书籍 7634607479384460313
+2026-05-03 01:03:39 [INFO] publisher.fanqie_client: 上传章节顺序: 7, 8, 9
+2026-05-03 01:03:39 [INFO] publisher.fanqie_client: POST /api/author/article/new_article/v0/ → HTTP 200  body={"code":0,"data":{"column_data":{"article_status":0,"book_id":"7634607479384460313","book_name":"火影：血雾判忍，开局救下白","can_charge":0,"previous_chapter_title":"","need_pay":0,"platform":2,"sale_type":0,"status":1,"verify_status":4,"audit_chapter":{"audit_failed_chapter_title":"","audit_time_chapter_title":""},"origin_chapter_ad_status":0,"chapter_ad_permission":false,"chapter_passed_num":6,"has_new_volume":false,"attribution_type":1,"book_extra_word_number":0,"has_new_volume_tip":"可以在这里选择新建的分卷"},"volum
+2026-05-03 01:03:39 [INFO] publisher.fanqie_client: 已创建草稿槽: item_id=7635341258981900862
+2026-05-03 01:03:40 [INFO] publisher.fanqie_client: POST /api/author/article/cover_article/v0/ → HTTP 200  body={"code":0,"data":{"latest_version":1},"log_id":"202605030103398F63B2D52D66A78FD983","message":"success"}
+
+2026-05-03 01:03:40 [INFO] publisher.fanqie_client: 草稿已保存: item_id=7635341258981900862, title=第 7 章 卡卡西的报告
+2026-05-03 01:03:41 [INFO] publisher.fanqie_client: POST /api/author/article/new_article/v0/ → HTTP 200  body={"code":0,"data":{"column_data":{"article_status":0,"book_id":"7634607479384460313","book_name":"火影：血雾判忍，开局救下白","can_charge":0,"previous_chapter_title":"","need_pay":0,"platform":2,"sale_type":0,"status":1,"verify_status":4,"audit_chapter":{"audit_failed_chapter_title":"","audit_time_chapter_title":""},"origin_chapter_ad_status":0,"chapter_ad_permission":false,"chapter_passed_num":6,"has_new_volume":false,"attribution_type":1,"book_extra_word_number":0,"has_new_volume_tip":"可以在这里选择新建的分卷"},"volum
+2026-05-03 01:03:41 [INFO] publisher.fanqie_client: 已创建草稿槽: item_id=7635341265520820798
+2026-05-03 01:03:41 [INFO] publisher.fanqie_client: POST /api/author/article/cover_article/v0/ → HTTP 200  body={"code":0,"data":{"latest_version":1},"log_id":"20260503010341E94AFBFAF650BD3E3E6A","message":"success"}
+
+2026-05-03 01:03:41 [INFO] publisher.fanqie_client: 草稿已保存: item_id=7635341265520820798, title=第 8 章 活下来的白
+2026-05-03 01:03:42 [INFO] publisher.fanqie_client: POST /api/author/article/new_article/v0/ → HTTP 200  body={"code":0,"data":{"column_data":{"article_status":0,"book_id":"7634607479384460313","book_name":"火影：血雾判忍，开局救下白","can_charge":0,"previous_chapter_title":"","need_pay":0,"platform":2,"sale_type":0,"status":1,"verify_status":4,"audit_chapter":{"audit_failed_chapter_title":"","audit_time_chapter_title":""},"origin_chapter_ad_status":0,"chapter_ad_permission":false,"chapter_passed_num":6,"has_new_volume":false,"attribution_type":1,"book_extra_word_number":0,"has_new_volume_tip":"可以在这里选择新建的分卷"},"volum
+2026-05-03 01:03:42 [INFO] publisher.fanqie_client: 已创建草稿槽: item_id=7635341271950688830
+2026-05-03 01:03:43 [INFO] publisher.fanqie_client: POST /api/author/article/cover_article/v0/ → HTTP 200  body={"code":0,"data":{"latest_version":1},"log_id":"202605030103425C459CB57C0A9F12FCCF","message":"success"}
+
+2026-05-03 01:03:43 [INFO] publisher.fanqie_client: 草稿已保存: item_id=7635341271950688830, title=第 9 章 追忍的雾
+2026-05-03 01:03:44 [DEBUG] publisher.fanqie_client: GET /api/author/chapter/chapter_list/v1 → HTTP 200  body='{"code":0,"data":{"total_count":6,"total_fail_count":0,"book_genre":0,"item_list":[{"item_id":"7635178608322953753","volume_id":"7634607480890215449","index":6,"title":"第 6 章 再不斩不欠他了","recommend_title'
+2026-05-03 01:03:44 [DEBUG] publisher.fanqie_client: GET /api/author/chapter/draft_list/v1/ → HTTP 200  body='{"code":0,"data":{"total_count":3,"draft_list":[{"item_id":"7635341271950688830","volume_id":"7634607480890215449","volume_name":"","index":-1,"title":"第 9 章 追忍的雾","modify_time":"1777741423","word_num'
+2026-05-03 01:18:58 [INFO] publisher.browser: 浏览器已关闭

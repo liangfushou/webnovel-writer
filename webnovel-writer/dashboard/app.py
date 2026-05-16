@@ -8,7 +8,9 @@ Webnovel Dashboard - FastAPI 主应用
 import asyncio
 import json
 import re
+import shutil
 import sqlite3
+import subprocess
 import sys
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager, closing
@@ -259,6 +261,57 @@ def _build_strand_map(state: dict) -> dict[int, str]:
         if chapter > 0 and strand:
             strand_map[chapter] = strand
     return strand_map
+
+
+def _normalize_strand(value: object) -> str:
+    strand = str(value or "").strip().lower()
+    if strand in {"quest", "主线", "目标", "目标线", "任务"}:
+        return "quest"
+    if strand in {"fire", "冲突", "冲突线", "战斗", "对抗"}:
+        return "fire"
+    if strand in {"constellation", "群像", "群像线", "世界观", "背景", "势力"}:
+        return "constellation"
+    return ""
+
+
+def _infer_strand_from_chapter(row: dict, reading_power: dict) -> str:
+    """只读兜底：没有 strand_tracker.history 时，从标题/摘要/hook 粗略推断叙事线。"""
+    hook_type = str(reading_power.get("hook_type") or "").strip()
+    title = str(row.get("title") or "").strip()
+    location = str(row.get("location") or "").strip()
+    summary = str(row.get("summary") or "").strip()
+    text = f"{hook_type} {title} {location} {summary}"
+
+    keyword_sets = {
+        "fire": [
+            "生死", "死线", "危机", "围杀", "追忍", "追杀", "合围", "弩线",
+            "刀", "对决", "灭口", "压上", "战", "杀局", "冲突", "登场",
+        ],
+        "constellation": [
+            "情报", "报告", "高层", "身份", "编号", "旧牌", "旧账", "名单",
+            "密件", "血继", "村", "势力", "制度", "边境", "雾隐", "水之国",
+            "名字", "残姓", "遗物", "石碑",
+        ],
+        "quest": [
+            "目标", "任务", "路线", "出发", "去", "进入", "离开", "选择",
+            "改写", "拆线", "不回", "寻找", "找到", "救", "回收", "承接",
+        ],
+    }
+    scores = {
+        strand: sum(1 for keyword in keywords if keyword and keyword in text)
+        for strand, keywords in keyword_sets.items()
+    }
+
+    if hook_type:
+        if any(keyword in hook_type for keyword in ("围杀", "追忍", "危机", "死线", "杀", "战", "弩线")):
+            scores["fire"] += 2
+        if any(keyword in hook_type for keyword in ("情报", "身份", "高层", "编号", "旧牌", "名单", "血继", "遗物")):
+            scores["constellation"] += 2
+        if any(keyword in hook_type for keyword in ("改写", "拆线", "不回", "小船", "路线", "去")):
+            scores["quest"] += 2
+
+    best = max(scores.items(), key=lambda item: (item[1], {"fire": 0, "quest": 1, "constellation": 2}[item[0]]))
+    return best[0] if best[1] > 0 else ""
 
 
 def _extract_story_chapter(path: Path) -> int:
@@ -601,6 +654,494 @@ def create_app(project_root: str | Path | None = None) -> FastAPI:
                 return []
             raise HTTPException(status_code=500, detail=f"数据库查询失败: {exc}") from exc
 
+    def _extract_chapter_num_from_filename(filename: str) -> int:
+        match = re.search(r"第\s*0*(\d{1,5})\s*章", filename)
+        if not match:
+            match = re.search(r"chapter[_-]?0*(\d{1,5})", filename, flags=re.IGNORECASE)
+        return _safe_int(match.group(1)) if match else 0
+
+    def _count_chapter_words(content: str) -> int:
+        text = re.sub(r"```[\s\S]*?```", "", content)
+        text = re.sub(r"^#+\s+.+$", "", text, flags=re.MULTILINE)
+        text = re.sub(r"<!--[\s\S]*?-->", "", text)
+        text = text.replace("---", "")
+        return len(text.strip())
+
+    def _extract_chapter_title(path: Path, content: str, chapter: int) -> str:
+        stem = path.stem
+        match = re.match(rf"第\s*0*{chapter}\s*章[-—_\s]*(.+?)\s*$", stem)
+        if match and match.group(1).strip():
+            return match.group(1).strip()
+        heading = re.search(
+            rf"^#\s*第\s*0*{chapter}\s*章[：:\s-]*(.+?)\s*$",
+            content,
+            flags=re.MULTILINE,
+        )
+        return heading.group(1).strip() if heading else stem
+
+    def _split_frontmatter(text: str) -> tuple[dict, str]:
+        if not text.startswith("---"):
+            return {}, text
+        parts = text.split("---", 2)
+        if len(parts) < 3:
+            return {}, text
+        frontmatter: dict[str, object] = {}
+        for raw_line in parts[1].splitlines():
+            if ":" not in raw_line:
+                continue
+            key, raw_value = raw_line.split(":", 1)
+            key = key.strip()
+            value = raw_value.strip()
+            if not key:
+                continue
+            if value.startswith("[") and value.endswith("]"):
+                try:
+                    frontmatter[key] = json.loads(value)
+                    continue
+                except json.JSONDecodeError:
+                    pass
+            frontmatter[key] = value.strip("'\"")
+        return frontmatter, parts[2].lstrip()
+
+    def _extract_markdown_section(text: str, heading: str) -> str:
+        pattern = rf"^##\s+{re.escape(heading)}\s*$"
+        match = re.search(pattern, text, flags=re.MULTILINE)
+        if not match:
+            return ""
+        body = text[match.end():]
+        next_heading = re.search(r"^##\s+", body, flags=re.MULTILINE)
+        if next_heading:
+            body = body[: next_heading.start()]
+        return body.strip()
+
+    def _load_summary_sidecar(project_root: Path, chapter: int) -> dict:
+        path = project_root / ".webnovel" / "summaries" / f"ch{chapter:04d}.md"
+        if not path.is_file():
+            return {}
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            return {}
+        frontmatter, body = _split_frontmatter(text)
+        location = frontmatter.get("location") or ""
+        if isinstance(location, list):
+            location = "、".join(str(item) for item in location if str(item).strip())
+        return {
+            "summary": _extract_markdown_section(body, "剧情摘要") or body.strip(),
+            "hook_type": str(frontmatter.get("hook_type") or "").strip(),
+            "hook_strength": str(frontmatter.get("hook_strength") or "medium").strip() or "medium",
+            "location": str(location or "").strip(),
+        }
+
+    def _iter_chapter_markdown_paths(project_root: Path) -> list[Path]:
+        chapters_dir = project_root / "正文"
+        if not chapters_dir.is_dir():
+            return []
+        return [
+            path
+            for path in sorted(chapters_dir.rglob("*.md"))
+            if path.is_file() and path.name != ".gitkeep"
+        ]
+
+    def _load_chapter_file_rows(project_root: Path) -> list[dict]:
+        rows: list[dict] = []
+        for path in _iter_chapter_markdown_paths(project_root):
+            chapter = _extract_chapter_num_from_filename(path.name)
+            if chapter <= 0:
+                continue
+            try:
+                content = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            sidecar = _load_summary_sidecar(project_root, chapter)
+            rows.append(
+                {
+                    "chapter": chapter,
+                    "title": _extract_chapter_title(path, content, chapter),
+                    "location": sidecar.get("location") or "",
+                    "word_count": _count_chapter_words(content),
+                    "characters": [],
+                    "summary": sidecar.get("summary") or "",
+                    "created_at": datetime.fromtimestamp(
+                        path.stat().st_mtime,
+                        tz=timezone.utc,
+                    ).isoformat(),
+                    "source": "chapter_file",
+                }
+            )
+        return rows
+
+    def _merge_chapter_rows(index_rows: list[dict], fallback_rows: list[dict]) -> list[dict]:
+        merged: dict[int, dict] = {}
+        for row in fallback_rows:
+            chapter = _safe_int(row.get("chapter"))
+            if chapter > 0:
+                merged[chapter] = dict(row)
+
+        for row in index_rows:
+            chapter = _safe_int(row.get("chapter"))
+            if chapter <= 0:
+                continue
+            item = dict(row)
+            item.setdefault("source", "index_db")
+            fallback = merged.get(chapter) or {}
+            for key in ("title", "location", "summary"):
+                if fallback.get(key):
+                    item[key] = fallback[key]
+            if _safe_int(fallback.get("word_count")):
+                item["word_count"] = fallback["word_count"]
+            merged[chapter] = item
+
+        return [merged[key] for key in sorted(merged)]
+
+    def _normalize_chapter_row(row: dict, state: dict) -> dict:
+        item = dict(row)
+        item["chapter"] = _safe_int(item.get("chapter"))
+        item["word_count"] = _safe_int(item.get("word_count"))
+        item["characters"] = _parse_json_value(item.get("characters"), [])
+        volume_item = _resolve_volume_item_for_chapter(state, item["chapter"])
+        if volume_item:
+            item["volume"] = volume_item.get("volume")
+            item["volume_title"] = volume_item.get("title") or f"第{volume_item.get('volume')}卷"
+            item["volume_range"] = volume_item.get("chapters_range") or ""
+        return item
+
+    def _committed_chapter_filter(state: dict) -> Optional[set[int]]:
+        """Return accepted chapter numbers when the workflow state tracks them."""
+        progress = state.get("progress") if isinstance(state, dict) else {}
+        chapter_status = progress.get("chapter_status") if isinstance(progress, dict) else {}
+        if not isinstance(chapter_status, dict) or not chapter_status:
+            return None
+
+        accepted: set[int] = set()
+        for raw_chapter, raw_status in chapter_status.items():
+            chapter = _safe_int(raw_chapter)
+            status = str(raw_status or "").strip().lower()
+            if chapter > 0 and (
+                "committed" in status
+                or "accepted" in status
+                or "published" in status
+            ):
+                accepted.add(chapter)
+        return accepted or None
+
+    def _load_chapter_rows(conn: sqlite3.Connection, state: dict) -> list[dict]:
+        index_rows = _fetchall_safe(conn, "SELECT * FROM chapters ORDER BY chapter ASC")
+        rows = _merge_chapter_rows(index_rows, _load_chapter_file_rows(_get_project_root()))
+        committed_chapters = _committed_chapter_filter(state)
+        if committed_chapters is not None:
+            rows = [
+                row
+                for row in rows
+                if _safe_int(row.get("chapter")) in committed_chapters
+            ]
+        return [_normalize_chapter_row(row, state) for row in rows]
+
+    def _load_summary_reading_power_map(project_root: Path) -> dict[int, dict]:
+        reading_map: dict[int, dict] = {}
+        summaries_dir = project_root / ".webnovel" / "summaries"
+        if not summaries_dir.is_dir():
+            return reading_map
+        for path in sorted(summaries_dir.glob("ch*.md")):
+            match = re.search(r"ch0*(\d{1,5})", path.stem, flags=re.IGNORECASE)
+            chapter = _safe_int(match.group(1)) if match else 0
+            if chapter <= 0:
+                continue
+            sidecar = _load_summary_sidecar(project_root, chapter)
+            reading_map[chapter] = {
+                "hook_type": sidecar.get("hook_type") or "",
+                "hook_strength": sidecar.get("hook_strength") or "medium",
+                "is_transition": 0,
+                "override_count": 0,
+                "debt_balance": 0.0,
+            }
+        return reading_map
+
+    def _first_heading(text: str, fallback: str) -> str:
+        for line in text.splitlines():
+            match = re.match(r"^#\s+(.+?)\s*$", line.strip())
+            if match:
+                title = match.group(1).strip()
+                return re.sub(r"^(?:技能卡|主角卡|女主卡)[：:]\s*", "", title).strip() or fallback
+        return fallback
+
+    def _compact_markdown_line(line: str) -> str:
+        return re.sub(r"\s+", " ", line.replace("**", "").replace("`", "").strip()).strip()
+
+    def _extract_card_desc(text: str) -> str:
+        desc_parts: list[str] = []
+        for raw_line in text.splitlines():
+            line = _compact_markdown_line(raw_line)
+            if (
+                not line
+                or line.startswith("#")
+                or line.startswith("|")
+                or line.startswith("---")
+            ):
+                continue
+            desc_parts.append(line.lstrip("- ").strip())
+            if len(desc_parts) >= 3:
+                break
+        return " ".join(part for part in desc_parts if part)[:220]
+
+    def _extract_chapter_bounds(text: str) -> tuple[int, int]:
+        chapters = [
+            int(match)
+            for match in re.findall(r"第\s*(\d{1,4})\s*章", text)
+            if int(match) > 0
+        ]
+        return (min(chapters), max(chapters)) if chapters else (0, 0)
+
+    def _extract_card_field(text: str, keys: list[str]) -> str:
+        key_pattern = "|".join(re.escape(key) for key in keys)
+        match = re.search(rf"^(?:-\s*)?(?:{key_pattern})[：:]\s*(.+?)\s*$", text, flags=re.MULTILINE)
+        return _compact_markdown_line(match.group(1)) if match else ""
+
+    def _infer_entity_type_from_path(path: Path) -> str:
+        path_text = str(path)
+        if "角色库" in path_text or path.name in {"主角卡.md", "女主卡.md", "主角组.md"}:
+            return "角色"
+        if "技能卡" in path_text:
+            return "招式"
+        if "物品库" in path_text:
+            return "物品"
+        return "setting"
+
+    def _load_protagonist_names(project_root: Path) -> set[str]:
+        names: set[str] = set()
+        setting_dir = project_root / "设定集"
+        for filename in ("主角卡.md", "主角组.md"):
+            path = setting_dir / filename
+            if not path.is_file():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            title = _first_heading(text, path.stem)
+            if title and title not in {"主角卡", "主角组"}:
+                names.add(title)
+            field_value = _extract_card_field(text, ["姓名", "主角姓名", "主角"])
+            if field_value:
+                for name in re.split(r"[、,，/|；;]\s*", field_value):
+                    clean_name = name.strip()
+                    if clean_name and clean_name not in {"主角卡", "主角组"}:
+                        names.add(clean_name)
+        return names
+
+    def _infer_entity_tier(path: Path, canonical_name: str, entity_type: str, protagonist_names: set[str]) -> str:
+        if path.name == "主角卡.md" or canonical_name in protagonist_names:
+            return "核心"
+        path_text = str(path)
+        if "主要角色" in path_text or "反派角色" in path_text:
+            return "重要"
+        if entity_type in {"招式", "物品"}:
+            return "重要"
+        return "参考"
+
+    def _iter_entity_card_paths(project_root: Path) -> list[Path]:
+        setting_dir = project_root / "设定集"
+        paths: list[Path] = []
+        for relative_dir in [
+            "角色库",
+            "技能卡",
+            "物品库",
+            "其他设定",
+        ]:
+            directory = setting_dir / relative_dir
+            if directory.is_dir():
+                paths.extend(
+                    path
+                    for path in sorted(directory.rglob("*.md"))
+                    if "总表" not in path.stem and "中后期" not in path.stem
+                )
+
+        for filename in ["主角卡.md"]:
+            path = setting_dir / filename
+            if path.is_file():
+                paths.append(path)
+
+        seen: set[Path] = set()
+        unique_paths: list[Path] = []
+        for path in paths:
+            if path in seen:
+                continue
+            seen.add(path)
+            unique_paths.append(path)
+        return unique_paths
+
+    def _load_card_entities(project_root: Path, protagonist_names: set[str]) -> list[dict]:
+        rows: list[dict] = []
+        for path in _iter_entity_card_paths(project_root):
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            title = _first_heading(text, path.stem)
+            entity_type = _infer_entity_type_from_path(path)
+            first_chapter, last_chapter = _extract_chapter_bounds(text)
+            relative_path = str(path.relative_to(project_root))
+            current = {
+                "source": "setting_card",
+                "source_file": relative_path,
+            }
+            holder = _extract_card_field(text, ["当前持有人", "持有人"])
+            if holder:
+                current["holder"] = holder
+            stage = _extract_card_field(text, ["当前阶段"])
+            if stage:
+                current["stage"] = stage
+            status = _extract_card_field(text, ["当前状态", "状态"])
+            if status:
+                current["status"] = status
+            is_protagonist = path.name == "主角卡.md" or title in protagonist_names
+
+            rows.append(
+                {
+                    "id": title,
+                    "type": entity_type,
+                    "canonical_name": title,
+                    "tier": _infer_entity_tier(path, title, entity_type, protagonist_names),
+                    "desc": _extract_card_desc(text),
+                    "current_json": json.dumps(current, ensure_ascii=False),
+                    "first_appearance": first_chapter,
+                    "last_appearance": last_chapter,
+                    "is_protagonist": 1 if is_protagonist else 0,
+                    "is_archived": 0,
+                    "created_at": "",
+                    "updated_at": "",
+                    "source": "setting_card",
+                }
+            )
+        return rows
+
+    def _load_story_event_entities(conn: sqlite3.Connection) -> list[dict]:
+        event_rows = _fetchall_safe(
+            conn,
+            """
+            SELECT subject, MIN(chapter) AS first_appearance, MAX(chapter) AS last_appearance, COUNT(*) AS event_count
+            FROM story_events
+            WHERE subject IS NOT NULL AND TRIM(subject) != ''
+            GROUP BY subject
+            """,
+        )
+        rows: list[dict] = []
+        for row in event_rows:
+            subject = str(row.get("subject") or "").strip()
+            if not subject:
+                continue
+            rows.append(
+                {
+                    "id": subject,
+                    "type": "剧情点",
+                    "canonical_name": subject,
+                    "tier": "派生",
+                    "desc": f"从章节提交事件自动派生，共 {int(row.get('event_count') or 0)} 次记录；建议补正式设定卡。",
+                    "current_json": json.dumps(
+                        {
+                            "source": "story_events",
+                            "event_count": int(row.get("event_count") or 0),
+                        },
+                        ensure_ascii=False,
+                    ),
+                    "first_appearance": int(row.get("first_appearance") or 0),
+                    "last_appearance": int(row.get("last_appearance") or 0),
+                    "is_protagonist": 0,
+                    "is_archived": 0,
+                    "created_at": "",
+                    "updated_at": "",
+                    "source": "story_events",
+                }
+            )
+        return rows
+
+    def _load_state_change_entities(conn: sqlite3.Connection, protagonist_names: set[str]) -> list[dict]:
+        state_rows = _fetchall_safe(
+            conn,
+            """
+            SELECT entity_id, MIN(chapter) AS first_appearance, MAX(chapter) AS last_appearance, COUNT(*) AS change_count
+            FROM state_changes
+            WHERE entity_id IS NOT NULL AND TRIM(entity_id) != ''
+            GROUP BY entity_id
+            """,
+        )
+        rows: list[dict] = []
+        for row in state_rows:
+            entity_id = str(row.get("entity_id") or "").strip()
+            if not entity_id:
+                continue
+            rows.append(
+                {
+                    "id": entity_id,
+                    "type": "状态实体",
+                    "canonical_name": entity_id,
+                    "tier": "派生",
+                    "desc": f"从状态变化记录自动派生，共 {int(row.get('change_count') or 0)} 次变化。",
+                    "current_json": json.dumps(
+                        {
+                            "source": "state_changes",
+                            "change_count": int(row.get("change_count") or 0),
+                        },
+                        ensure_ascii=False,
+                    ),
+                    "first_appearance": int(row.get("first_appearance") or 0),
+                    "last_appearance": int(row.get("last_appearance") or 0),
+                    "is_protagonist": 1 if entity_id in protagonist_names else 0,
+                    "is_archived": 0,
+                    "created_at": "",
+                    "updated_at": "",
+                    "source": "state_changes",
+                }
+            )
+        return rows
+
+    def _merge_entity_rows(index_rows: list[dict], fallback_rows: list[dict]) -> list[dict]:
+        merged: dict[str, dict] = {}
+        canonical_index: dict[str, str] = {}
+        for row in index_rows:
+            item = dict(row)
+            item.setdefault("source", "index_db")
+            key = str(item.get("id") or item.get("canonical_name"))
+            merged[key] = item
+            canonical = str(item.get("canonical_name") or "").strip()
+            if canonical:
+                canonical_index[canonical] = key
+
+        for row in fallback_rows:
+            key = str(row.get("id") or row.get("canonical_name"))
+            canonical = str(row.get("canonical_name") or "").strip()
+            existing_key = key if key in merged else canonical_index.get(canonical)
+            existing = merged.get(existing_key) if existing_key else None
+            if not existing:
+                merged[key] = row
+                if canonical:
+                    canonical_index[canonical] = key
+                continue
+
+            existing.setdefault("source", "index_db")
+            if not int(existing.get("first_appearance") or 0) and int(row.get("first_appearance") or 0):
+                existing["first_appearance"] = row["first_appearance"]
+            if not int(existing.get("last_appearance") or 0) and int(row.get("last_appearance") or 0):
+                existing["last_appearance"] = row["last_appearance"]
+            if not existing.get("desc") and row.get("desc"):
+                existing["desc"] = row["desc"]
+            if not existing.get("current_json") and row.get("current_json"):
+                existing["current_json"] = row["current_json"]
+            if int(row.get("is_protagonist") or 0):
+                existing["is_protagonist"] = 1
+                if not existing.get("tier") or existing.get("tier") in {"参考", "派生"}:
+                    existing["tier"] = row.get("tier") or "核心"
+
+        return sorted(
+            merged.values(),
+            key=lambda item: (
+                -int(item.get("is_protagonist") or 0),
+                -int(item.get("last_appearance") or 0),
+                -int(item.get("first_appearance") or 0),
+                str(item.get("canonical_name") or item.get("id") or ""),
+            ),
+        )
+
     @app.get("/api/entities")
     def list_entities(
         entity_type: Optional[str] = Query(None, alias="type"),
@@ -611,16 +1152,23 @@ def create_app(project_root: str | Path | None = None) -> FastAPI:
             q = "SELECT * FROM entities"
             params: list = []
             clauses: list[str] = []
-            if entity_type:
-                clauses.append("type = ?")
-                params.append(entity_type)
             if not include_archived:
                 clauses.append("is_archived = 0")
             if clauses:
                 q += " WHERE " + " AND ".join(clauses)
             q += " ORDER BY last_appearance DESC"
-            rows = conn.execute(q, params).fetchall()
-            return [dict(r) for r in rows]
+            index_rows = [dict(r) for r in conn.execute(q, params).fetchall()]
+            protagonist_names = _load_protagonist_names(_get_project_root())
+            state_rows = _load_state_change_entities(conn, protagonist_names)
+            event_rows = _load_story_event_entities(conn)
+
+        fallback_rows = [*state_rows, *_load_card_entities(_get_project_root(), protagonist_names), *event_rows]
+        rows = _merge_entity_rows(index_rows, fallback_rows)
+        if entity_type:
+            rows = [row for row in rows if row.get("type") == entity_type]
+        if not include_archived:
+            rows = [row for row in rows if not int(row.get("is_archived") or 0)]
+        return rows
 
     @app.get("/api/entities/{entity_id}")
     def get_entity(entity_id: str):
@@ -676,19 +1224,7 @@ def create_app(project_root: str | Path | None = None) -> FastAPI:
     def list_chapters():
         state = _load_state_payload()
         with closing(_get_db()) as conn:
-            rows = conn.execute("SELECT * FROM chapters ORDER BY chapter ASC").fetchall()
-            normalized = []
-            for row in rows:
-                item = dict(row)
-                item["characters"] = _parse_json_value(item.get("characters"), [])
-                chapter_num = _safe_int(item.get("chapter"))
-                volume_item = _resolve_volume_item_for_chapter(state, chapter_num)
-                if volume_item:
-                    item["volume"] = volume_item.get("volume")
-                    item["volume_title"] = volume_item.get("title") or f"第{volume_item.get('volume')}卷"
-                    item["volume_range"] = volume_item.get("chapters_range") or ""
-                normalized.append(item)
-            return normalized
+            return _load_chapter_rows(conn, state)
 
     @app.get("/api/scenes")
     def list_scenes(chapter: Optional[int] = None, limit: int = 500):
@@ -732,44 +1268,40 @@ def create_app(project_root: str | Path | None = None) -> FastAPI:
         strand_map = _build_strand_map(state)
 
         with closing(_get_db()) as conn:
-            total_rows = _fetchall_safe(conn, "SELECT COUNT(*) AS count FROM chapters")
-            latest_rows = _fetchall_safe(conn, "SELECT MAX(chapter) AS chapter FROM chapters")
-            rows = _fetchall_safe(
+            all_rows = _load_chapter_rows(conn, state)
+            reading_rows = _fetchall_safe(conn, "SELECT * FROM chapter_reading_power")
+            review_rows = _fetchall_safe(
                 conn,
-                """
-                WITH selected_chapters AS (
-                    SELECT chapter, title, location, word_count, characters, summary
-                    FROM chapters
-                    ORDER BY chapter DESC
-                    LIMIT ? OFFSET ?
-                )
-                SELECT
-                    c.chapter,
-                    c.title,
-                    c.location,
-                    c.word_count,
-                    c.characters,
-                    c.summary,
-                    rp.hook_type,
-                    rp.hook_strength,
-                    rp.is_transition,
-                    rp.override_count,
-                    rp.debt_balance,
-                    rm.overall_score AS review_score,
-                    rm.severity_counts
-                FROM selected_chapters c
-                LEFT JOIN chapter_reading_power rp ON rp.chapter = c.chapter
-                LEFT JOIN review_metrics rm ON rm.end_chapter = c.chapter
-                ORDER BY c.chapter ASC
-                """,
-                (limit, offset),
+                "SELECT end_chapter, overall_score, severity_counts FROM review_metrics",
             )
+
+        sorted_desc = sorted(all_rows, key=lambda item: _safe_int(item.get("chapter")), reverse=True)
+        rows = sorted(
+            sorted_desc[offset: offset + limit],
+            key=lambda item: _safe_int(item.get("chapter")),
+        )
+        reading_map = {
+            _safe_int(row.get("chapter")): row
+            for row in reading_rows
+            if _safe_int(row.get("chapter")) > 0
+        }
+        summary_reading_map = _load_summary_reading_power_map(_get_project_root())
+        review_map = {
+            _safe_int(row.get("end_chapter")): row
+            for row in review_rows
+            if _safe_int(row.get("end_chapter")) > 0
+        }
 
         hook_strength_value = {"weak": 1, "medium": 3, "strong": 5}
         items = []
         for row in rows:
             chapter = int(row.get("chapter") or 0)
-            hook_strength = str(row.get("hook_strength") or "").strip().lower()
+            reading_power = reading_map.get(chapter) or summary_reading_map.get(chapter) or {}
+            review = review_map.get(chapter) or {}
+            hook_strength = str(reading_power.get("hook_strength") or "").strip().lower()
+            history_strand = _normalize_strand(strand_map.get(chapter, ""))
+            inferred_strand = _infer_strand_from_chapter(row, reading_power) if not history_strand else ""
+            strand = history_strand or inferred_strand
             items.append(
                 {
                     "chapter": chapter,
@@ -778,23 +1310,24 @@ def create_app(project_root: str | Path | None = None) -> FastAPI:
                     "word_count": int(row.get("word_count") or 0),
                     "characters": _parse_json_value(row.get("characters"), []),
                     "summary": row.get("summary") or "",
-                    "review_score": row.get("review_score"),
-                    "review_severity_counts": _parse_json_value(row.get("severity_counts"), {}),
-                    "hook_type": row.get("hook_type") or "",
+                    "review_score": review.get("overall_score"),
+                    "review_severity_counts": _parse_json_value(review.get("severity_counts"), {}),
+                    "hook_type": reading_power.get("hook_type") or "",
                     "hook_strength": hook_strength,
                     "hook_strength_value": hook_strength_value.get(hook_strength, 0),
-                    "is_transition": bool(row.get("is_transition")),
-                    "override_count": int(row.get("override_count") or 0),
-                    "debt_balance": float(row.get("debt_balance") or 0.0),
-                    "strand": strand_map.get(chapter, ""),
+                    "is_transition": bool(reading_power.get("is_transition")),
+                    "override_count": int(reading_power.get("override_count") or 0),
+                    "debt_balance": float(reading_power.get("debt_balance") or 0.0),
+                    "strand": strand,
+                    "strand_source": "history" if history_strand else ("inferred" if inferred_strand else ""),
                     "volume": _resolve_volume_for_chapter(state, chapter),
                 }
             )
 
         return {
             "items": items,
-            "total": int(total_rows[0]["count"] or 0) if total_rows else 0,
-            "latest_chapter": int(latest_rows[0]["chapter"] or 0) if latest_rows else 0,
+            "total": len(all_rows),
+            "latest_chapter": max((_safe_int(row.get("chapter")) for row in all_rows), default=0),
             "limit": limit,
             "offset": offset,
         }
@@ -1172,6 +1705,37 @@ def create_app(project_root: str | Path | None = None) -> FastAPI:
             content = "[二进制文件，无法预览]"
 
         return {"path": path, "content": content}
+
+    @app.post("/api/clipboard/write")
+    def clipboard_write(text: str = Body(..., embed=True)):
+        """将文本写入本机剪贴板，作为浏览器 Clipboard API 被拦截时的本地兜底。"""
+        if not isinstance(text, str) or not text:
+            raise HTTPException(400, "复制内容为空")
+        if len(text) > 2_000_000:
+            raise HTTPException(413, "复制内容过大")
+
+        if sys.platform == "darwin":
+            command = ["pbcopy"]
+        elif sys.platform.startswith("linux"):
+            if shutil.which("wl-copy"):
+                command = ["wl-copy"]
+            elif shutil.which("xclip"):
+                command = ["xclip", "-selection", "clipboard"]
+            elif shutil.which("xsel"):
+                command = ["xsel", "--clipboard", "--input"]
+            else:
+                raise HTTPException(501, "当前系统未找到可用剪贴板命令")
+        elif sys.platform.startswith("win"):
+            command = ["clip"]
+        else:
+            raise HTTPException(501, "当前系统暂不支持后端剪贴板写入")
+
+        try:
+            subprocess.run(command, input=text, text=True, check=True, timeout=5)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise HTTPException(500, f"写入剪贴板失败: {exc}") from exc
+
+        return {"success": True, "chars": len(text)}
 
     # ===========================================================
     # SSE：实时变更推送

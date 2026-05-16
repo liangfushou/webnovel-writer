@@ -1,0 +1,622 @@
+# 番茄小说平台排版与去AI化规则集 v2.0
+# 适配 DeepSeek 等 LLM 使用
+# 核心理念：短平快、高频换行、对话独立、视觉留白、极致去AI
+
+schema_version: "2.0"
+target_platform: "番茄小说 (手机竖屏阅读)"
+description: |
+  番茄小说专属排版规则集，完整继承通用小说润色字典树。
+  正则负责暴力切分文字墙，LLM 负责润色提速与场景切割。
+
+# ============================================================
+# 核心配置参数
+# ============================================================
+config:
+  max_chars_per_paragraph: 80          # 单段最大字符数
+  max_sentences_per_paragraph: 2       # 单段最大句子数
+  dialogue_isolation_enforced: true    # 强制对话独立成段
+  pacing_accelerate_rate: 0.85         # 节奏提速替换概率
+  ai_phrase_replace_rate: 0.85         # AI套话替换概率
+  word_replace_rate: 0.50              # 通用词汇替换概率
+  novel_oral_replace_rate: 0.50        # 小说口语化替换概率
+
+# ============================================================
+# LLM 系统指令（DeepSeek 专用）
+# ============================================================
+llm_system_instruction: |
+  你是番茄小说平台的白金作家兼主编。你的核心任务：
+
+  1. **极简短段**：任何对话必须独占一段！环境描写不超过两句！超过立刻换行！
+  2. **情绪外放**：内心纠结转化为外在动作（冷笑、皱眉、握拳、叹息）
+  3. **砍掉树枝与AI味**：删除无用风景、衣服首饰、路人背景。清除AI黑名单词汇（赋能、底层逻辑等）
+  4. **火箭节奏**：剧情必须像火箭一样往前推！
+
+  处理流程：
+  - 第一遍：执行所有正则规则（对话孤立、文字墙切分、AI痕迹删除）
+  - 第二遍：应用字典替换（节奏提速、视觉动作、去AI套话）
+  - 第三遍：LLM 语义重写（消除AI腔、增强文学质感、保留原意）
+  - 第四遍：最终清理（标点统一、空行收敛、章末留白）
+
+# ============================================================
+# 处理流水线
+# ============================================================
+pipelines:
+
+  # --- 阶段1：基础清洗（正则 + 字面删除）---
+  stage_1_basic_cleanup:
+    - name: "统一引号为中文「」『』"
+      type: "char_replace"
+      rules:
+        - {from: """, to: "「"}
+        - {from: """, to: "」"}
+        - {from: "'", to: "『"}
+        - {from: "'", to: "』"}
+        - {from: "\"", to: "「", note: "ASCII双引号奇偶配对"}
+
+    - name: "统一省略号为……"
+      type: "regex_replace"
+      pattern: '\.{3,}|…+'
+      replacement: "……"
+
+    - name: "统一破折号为——"
+      type: "regex_replace"
+      pattern: '-{2,}|[–—―]+'
+      replacement: "——"
+
+    - name: "删除AI元说明段落"
+      type: "remove_paragraphs_matching"
+      patterns:
+        - '我将按照您的'
+        - '按照您的要求'
+        - '根据您(供给|提供)的'
+        - '以下是我(根据|为您|按照)'
+        - '故事梗概'
+        - '本次写作(重点|将|主要)'
+        - '接下来故事(可能|将|会)'
+        - '这是一个关于.{0,20}的故事'
+
+    - name: "删除Markdown残留"
+      type: "regex_replace_multiline"
+      patterns:
+        - {pattern: '^\s*#{1,4}\s+', replacement: ""}
+        - {pattern: '^\s*[-\*]\s+\*\*[^\*]+\*\*[:：]', replacement: ""}
+        - {pattern: '^\s*(?:---+|\*\*\*+|===+)\s*$', replacement: ""}
+
+    - name: "删除AI模板段落"
+      type: "remove_paragraphs_matching"
+      patterns:
+        - '首先[，,].*?其次[，,].*?最后'
+        - '一方面[，,].*?另一方面'
+        - '第一[，,].*?第二[，,].*?第三'
+        - '虽然.*?但是.*?同时'
+        - '不仅.*?而且.*?更'
+        - '随着.*?的(不断)?发展'
+        - '在.*?的背景下'
+        - '在当今.*?时代'
+        - '可以说[，,]'
+        - '总的来说[，,]'
+        - '(?:(?:①|②|③|④|⑤|1\.|2\.|3\.).*?\n){3,}'
+
+    - name: "删除23条AI废话"
+      type: "literal_remove"
+      phrases:
+        - "综上所述"
+        - "值得注意的是"
+        - "不难发现"
+        - "总而言之"
+        - "不可否认"
+        - "毫无疑问"
+        - "显而易见"
+        - "众所周知"
+        - "由此可见"
+        - "需要指出的是"
+        - "值得一提的是"
+        - "不言而喻"
+        - "毋庸置疑"
+        - "事实上"
+        - "实际上"
+        - "严格来说"
+        - "换句话说"
+        - "从某种意义上说"
+        - "在一定程度上"
+        - "就目前来看"
+        - "总的来说"
+        - "概括来说"
+        - "归根结底"
+
+    - name: "数字汉字化"
+      type: "digit_normalization"
+      rules:
+        - {pattern: '(?<!\d)((?:19|20)\d{2})(?=年)', transform: "year_4digit"}
+        - {pattern: '(?<!\d)(\d0)年代', transform: "decade"}
+        - {pattern: '(?<![\d年个])([1-9]|1[0-2])(?=月(?:\D|$))', transform: "month"}
+        - {pattern: '(?<![\d月])([1-9]|[12]\d|3[01])(?=[日号])', transform: "day"}
+
+  # --- 阶段2：番茄专属暴力排版 ---
+  stage_2_tomato_formatting:
+    - name: "对话孤立机制"
+      type: "regex_replace"
+      pattern: '(?<!\n\n)([「"].*?[」"])(?!\n\n)'
+      replacement: "\n\n$1\n\n"
+      description: "任何对话前后必须有双换行"
+
+    - name: "文字墙暴力切分"
+      type: "regex_replace"
+      pattern: '([^「」""\n]{40,}[。！？])(?=[^「」""\n])'
+      replacement: "$1\n\n"
+      description: "连续40字无换行且遇句号，强制换行"
+
+    - name: "删除设定铺陈"
+      type: "mark_for_llm_compression"
+      patterns:
+        - '(?:这是一个|那是一个).*?的(?:世界|地方|时代)'
+        - '.*?的历史可以追溯到.*?'
+        - '(?:放眼望去|四周|周围)(?:全是|尽是|布满了).*?'
+        - '(?:红色的|蓝色的|绿色的|高大的|巨大的){3,}'
+        - '这里的境界划分为.*?'
+      note: "标记后由LLM极限压缩或删除"
+
+    - name: "删除番茄禁忌词"
+      type: "literal_remove"
+      phrases:
+        - "不知不觉间"
+        - "时间一分一秒地过去"
+        - "经过漫长的等待"
+        - "心里暗暗想了很久"
+        - "千言万语汇成一句话"
+        - "陷入了长久的沉默"
+        - "脑海中闪过无数个念头"
+        - "从前有一个传说"
+        - "很久很久以前"
+
+  # --- 阶段3：字典替换（混合番茄+通用）---
+  stage_3_dictionary_replacement:
+    - name: "节奏提速字典"
+      type: "dictionary_replace"
+      rate: 0.85
+      blacklist_check: true
+      rules:
+        "他想了想": ["他眼珠一转", "他冷笑一声", "他眼神一凛"]
+        "慢慢地走过去": ["大步上前", "几步跨到面前", "闪身逼近"]
+        "看了很久": ["目光一扫", "死死盯住", "定睛一看"]
+        "非常生气": ["怒火中烧", "脸色猛地沉了下来", "气极反笑"]
+        "感觉很惊讶": ["倒吸一口凉气", "瞳孔猛地一缩", "心里咯噔一下"]
+        "大声说道": ["厉声喝道", "脱口而出", "冷喝一声"]
+        "点了点头": ["下巴一点", "不可置否", "算是默认"]
+        "摇了摇头": ["嗤笑摇头", "眉头一皱"]
+        "过了一会儿": ["半晌", "片刻后", "没过多久"]
+        "开始准备": ["立刻动手", "毫不废话"]
+
+    - name: "视觉动作词典"
+      type: "dictionary_replace"
+      rate: 0.85
+      blacklist_check: true
+      rules:
+        "拿": ["一把抓过", "抄起", "猛地抽出"]
+        "放": ["重重摔下", "随手一掷", "甩在"]
+        "跑": ["狂奔", "化作一道残影", "爆射而出"]
+        "打": ["狠狠砸下", "一记重拳", "轰出"]
+        "笑": ["咧嘴一笑", "冷笑", "嘴角勾起一抹讥讽"]
+        "看": ["睥睨", "斜睨", "冷冷扫过"]
+        "说": ["吐出几个字", "寒声道", "似笑非笑地说"]
+
+    - name: "AI套话短语替换（148条精选）"
+      type: "dictionary_replace"
+      rate: 0.85
+      blacklist_check: true
+      rules:
+        "值得注意的是": ["注意", "要提醒的是", "特别说一下"]
+        "综上所述": ["总之", "说到底", "简单讲"]
+        "不难发现": ["可以看到", "很明显", "你会发现"]
+        "与此同时": ["同时", "这时候", "另一边"]
+        "由此可见": ["所以", "可见", "看得出"]
+        "此外": ["另外", "还有", "再说"]
+        "闭环": ["完整流程", "全链路", "一条龙"]
+        "深度剖析": ["深入分析", "仔细看看", "拆解一下"]
+        "助力": ["帮助", "推动", "促进"]
+        "彰显": ["展现", "体现", "表现出"]
+        "底层逻辑": ["根本原因", "核心逻辑", "本质"]
+        "抓手": ["切入点", "突破口", "着力点"]
+        "心智": ["认知", "印象", "想法"]
+        "沉淀": ["积累", "总结", "留下"]
+        "对齐": ["统一", "同步", "拉齐"]
+        "复盘": ["回顾", "总结", "反思"]
+        "迭代": ["更新", "升级", "演进"]
+        # ... 更多规则见原字典
+
+    - name: "通用同义词替换（105词）"
+      type: "dictionary_replace"
+      rate: 0.50
+      blacklist_check: true
+      rules:
+        "因此": ["所以", "因而", "为此", "故而"]
+        "然而": ["不过", "但", "可是", "只是"]
+        "但是": ["不过", "可是", "只是", "然而"]
+        "虽然": ["尽管", "即便", "就算", "纵然"]
+        "能够": ["可以", "得以", "足以", "有能力"]
+        "进行": ["开展", "实施", "做", "搞"]
+        "实现": ["达成", "做到", "完成", "办到"]
+        # ... 更多规则见原字典
+
+    - name: "小说口语化（短语优先）"
+      type: "dictionary_replace"
+      rate: 0.50
+      priority: "phrase_before_word"
+      rules:
+        "看了很久": ["看了很久很久"]
+        "等了很久": ["已经等了很久很久了"]
+        "深吸一口气": ["深深吸了一口气"]
+        "就在这时": ["就在这个时候"]
+
+    - name: "小说口语化（单词）"
+      type: "dictionary_replace"
+      rate: 0.50
+      rules:
+        "看": ["瞧"]
+        "看见": ["瞧见"]
+        "漆黑": ["黑乎乎", "黑漆漆"]
+        "寂静": ["死寂", "静悄悄"]
+        "突然": ["猛地", "冷不丁"]
+        "立刻": ["马上", "当下"]
+
+  # --- 阶段4：LLM 语义重写 ---
+  stage_4_llm_rewrite:
+    instruction: |
+      现在对文本进行语义重写，目标：
+
+      1. **消除AI腔**：
+         - 被动改主动（"被发现" → "他发现"）
+         - 打散三段式模板（首先其次最后）
+         - 去过度连接词（然而、因此、与此同时）
+         - 落地具体细节（"感到害怕" → "手心冒汗，腿肚子发软"）
+
+      2. **增强文学质感**：
+         - 感官细节：视觉、听觉、触觉、嗅觉
+         - 角色个性对话：每个人说话方式不同
+         - 情绪融入景物：不要纯客观描写
+         - 节奏变化：短句爆发，长句铺垫
+
+      3. **保留原意**：
+         - 不添加情节
+         - 不改因果关系
+         - 保持专有名词
+         - 保持时间线
+
+      4. **番茄特殊要求**：
+         - 对话必须独立成段
+         - 内心戏转化为动作
+         - 删除风景铺陈
+         - 每段不超过80字
+
+    blacklist_enforcement: |
+      重写时绝对禁止使用以下36个AI指纹词：
+      全方位、凸显、出圈、创新驱动、加持、助力、协同增效、复盘、
+      多维度、对齐、底层逻辑、彰显、心智、愿景、打通壁垒、抓手、
+      拉通、数字化转型、智慧时代、沉淀、深度剖析、深度融合、焕发、
+      生态、破圈、系统性、触达、赋能、赛道、迭代、链路、闭环、
+      降本增效、革新、顶层设计、颠覆
+
+      以及49个小说场景黑名单词（过于俚俗）：
+      业已、亮点、估摸着、做、兴许、势头、压根、地带、大抵、
+      好处、家底、干脆、弄、当面、径直、思量、成堆的、打法、
+      打理、拉高、招数、挑、揽获、搞、搞定、摆平、撑持、敲定、
+      整、料理、施用、早就、最要紧的、本事、本钱、来由、架构、
+      框架、档次、段位、琢磨、症结、约莫、缘于、缘由、苗头、
+      门槛、麻烦
+
+  # --- 阶段5：最终清理 ---
+  stage_5_final_cleanup:
+    - name: "再次数字汉字化"
+      type: "digit_normalization"
+      note: "防止LLM重写时引入阿拉伯数字"
+
+    - name: "再次删除AI废话"
+      type: "literal_remove"
+      phrases: ["综上所述", "值得注意的是", "不难发现"]
+
+    - name: "再次统一引号"
+      type: "char_replace"
+      rules:
+        - {from: """, to: "「"}
+        - {from: """, to: "」"}
+
+    - name: "空行收敛"
+      type: "regex_replace"
+      pattern: '\n{3,}'
+      replacement: "\n\n"
+      description: "将3+空行收敛为标准双换行"
+
+    - name: "章末悬念留白"
+      type: "regex_replace"
+      pattern: '([。！？"」])\s*$'
+      replacement: "$1\n\n\n"
+      description: "章末增加额外空行，给读者滑页缓冲"
+
+# ============================================================
+# 字典替换算法说明
+# ============================================================
+dictionary_algorithm:
+  description: |
+    字典替换采用"长key优先 + 随机候选 + 黑名单过滤"策略：
+
+    1. 按 key.Length 降序遍历字典（避免子串先吃）
+    2. 在文本中逐位置查找 key（Ordinal 比较）
+    3. 对每次命中：rand() < rate ? pick(safe_candidates) : keep(key)
+    4. safe_candidates = candidates - ai_blacklist - novel_blacklist
+    5. 如果所有候选都在黑名单，保持原key不变
+
+  example_python: |
+    import random
+
+    def apply_dictionary(text, rules, rate, ai_blacklist, novel_blacklist):
+        # 按key长度降序排序
+        sorted_keys = sorted(rules.keys(), key=len, reverse=True)
+
+        for key in sorted_keys:
+            candidates = rules[key]
+            # 过滤黑名单
+            safe = [c for c in candidates
+                    if c not in ai_blacklist and c not in novel_blacklist]
+
+            if not safe:
+                continue
+
+            # 逐位置查找并替换
+            pos = 0
+            while pos < len(text):
+                idx = text.find(key, pos)
+                if idx == -1:
+                    break
+
+                if random.random() < rate:
+                    replacement = random.choice(safe)
+                    text = text[:idx] + replacement + text[idx+len(key):]
+                    pos = idx + len(replacement)
+                else:
+                    pos = idx + len(key)
+
+        return text
+
+# ============================================================
+# 段落切分算法说明
+# ============================================================
+paragraph_splitting_algorithm:
+  description: |
+    文字墙粉碎算法：
+
+    1. 按 '\n\n' 切段
+    2. 检测段落长度
+    3. 若 length > max_chars_per_paragraph：
+       - 在最靠近中心的句号、问号或感叹号处
+       - 强制插入 '\n\n'
+    4. 重新拼接
+
+  example_python: |
+    def break_text_walls(text, max_chars=80):
+        paragraphs = text.split('\n\n')
+        result = []
+
+        for para in paragraphs:
+            if len(para) <= max_chars:
+                result.append(para)
+                continue
+
+            # 找最靠近中心的句号
+            center = len(para) // 2
+            best_pos = -1
+            min_dist = float('inf')
+
+            for i, char in enumerate(para):
+                if char in '。！？':
+                    dist = abs(i - center)
+                    if dist < min_dist:
+                        min_dist = dist
+                        best_pos = i
+
+            if best_pos != -1:
+                result.append(para[:best_pos+1])
+                result.append(para[best_pos+1:])
+            else:
+                result.append(para)
+
+        return '\n\n'.join(result)
+
+# ============================================================
+# 数字汉字化规则
+# ============================================================
+digit_normalization:
+  rules:
+    year_4digit:
+      pattern: '(?<!\d)((?:19|20)\d{2})(?=年)'
+      example: "1987年 → 一九八七年"
+      transform: "逐位查表拼接"
+      table:
+        "0": "零"
+        "1": "一"
+        "2": "二"
+        "3": "三"
+        "4": "四"
+        "5": "五"
+        "6": "六"
+        "7": "七"
+        "8": "八"
+        "9": "九"
+
+    decade:
+      pattern: '(?<!\d)(\d0)年代'
+      example: "80年代 → 八十年代"
+      table:
+        "10": "十"
+        "20": "二十"
+        "30": "三十"
+        "40": "四十"
+        "50": "五十"
+        "60": "六十"
+        "70": "七十"
+        "80": "八十"
+        "90": "九十"
+
+    month:
+      pattern: '(?<![\d年个])([1-9]|1[0-2])(?=月(?:\D|$))'
+      example: "5月 → 五月"
+      note: "前置否定避免误伤'5000年'/'3个月'"
+
+    day:
+      pattern: '(?<![\d月])([1-9]|[12]\d|3[01])(?=[日号])'
+      example: "15日 → 十五日"
+
+# ============================================================
+# 黑名单（候选过滤器）
+# ============================================================
+blacklists:
+  ai_fingerprint_36:
+    - "全方位"
+    - "凸显"
+    - "出圈"
+    - "创新驱动"
+    - "加持"
+    - "助力"
+    - "协同增效"
+    - "复盘"
+    - "多维度"
+    - "对齐"
+    - "底层逻辑"
+    - "彰显"
+    - "心智"
+    - "愿景"
+    - "打通壁垒"
+    - "抓手"
+    - "拉通"
+    - "数字化转型"
+    - "智慧时代"
+    - "沉淀"
+    - "深度剖析"
+    - "深度融合"
+    - "焕发"
+    - "生态"
+    - "破圈"
+    - "系统性"
+    - "触达"
+    - "赋能"
+    - "赛道"
+    - "迭代"
+    - "链路"
+    - "闭环"
+    - "降本增效"
+    - "革新"
+    - "顶层设计"
+    - "颠覆"
+
+  novel_scene_49:
+    - "业已"
+    - "亮点"
+    - "估摸着"
+    - "做"
+    - "做过"
+    - "兴许"
+    - "势头"
+    - "压根"
+    - "地带"
+    - "大抵"
+    - "好处"
+    - "家底"
+    - "干脆"
+    - "弄"
+    - "当面"
+    - "径直"
+    - "思量"
+    - "成堆的"
+    - "打法"
+    - "打理"
+    - "拉高"
+    - "招数"
+    - "挑"
+    - "揽获"
+    - "搞"
+    - "搞定"
+    - "摆平"
+    - "撑持"
+    - "敲定"
+    - "整"
+    - "料理"
+    - "施用"
+    - "早就"
+    - "最要紧的"
+    - "本事"
+    - "本钱"
+    - "来由"
+    - "架构"
+    - "框架"
+    - "档次"
+    - "段位"
+    - "琢磨"
+    - "症结"
+    - "约莫"
+    - "缘于"
+    - "缘由"
+    - "苗头"
+    - "门槛"
+    - "麻烦"
+
+# ============================================================
+# 使用示例（DeepSeek API 调用）
+# ============================================================
+usage_example_deepseek: |
+  import yaml
+  import requests
+
+  # 加载规则
+  with open('tomato-mobile-formatting-optimized.yaml', 'r', encoding='utf-8') as f:
+      rules = yaml.safe_load(f)
+
+  # 准备文本
+  input_text = "你的小说章节内容..."
+
+  # 构建 DeepSeek 提示词
+  system_prompt = rules['llm_system_instruction']
+  user_prompt = f"""
+  请按照番茄小说排版规则处理以下文本：
+
+  {input_text}
+
+  要求：
+  1. 对话必须独立成段
+  2. 每段不超过80字
+  3. 删除AI痕迹词汇
+  4. 内心戏转化为动作
+  5. 节奏提速，火箭推进
+  """
+
+  # 调用 DeepSeek API
+  response = requests.post(
+      'https://api.deepseek.com/v1/chat/completions',
+      headers={'Authorization': 'Bearer YOUR_API_KEY'},
+      json={
+          'model': 'deepseek-chat',
+          'messages': [
+              {'role': 'system', 'content': system_prompt},
+              {'role': 'user', 'content': user_prompt}
+          ],
+          'temperature': 0.7,
+          'max_tokens': 4000
+      }
+  )
+
+  result = response.json()['choices'][0]['message']['content']
+  print(result)
+
+# ============================================================
+# 移植提示（其他语言）
+# ============================================================
+porting_hints:
+  javascript:
+    regex_example: "new RegExp(pattern, 'gm')"
+    mobile_test: "容器宽度375px，字号18px，行高1.8"
+
+  csharp:
+    regex_example: "new Regex(pattern, RegexOptions.Compiled | RegexOptions.Multiline)"
+    string_compare: "StringComparison.Ordinal"
+
+  python:
+    regex_example: "re.compile(pattern, re.MULTILINE)"
+    split_example: "text.replace('\\r\\n', '\\n').split('\\n\\n')"

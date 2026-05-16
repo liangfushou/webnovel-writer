@@ -130,7 +130,8 @@ model: sonnet  # 可选：inherit / sonnet / opus / haiku
 
 | 版本 | 主要变化 |
 |------|----------|
-| **v6.0.0 (当前)** | Story System 全链路上线（合同种子 + 运行时合同 + 章节提交 + 事件审计），补齐集成测试 |
+| **v6.1.0 (当前)** | Dashboard 数据管线修复：审查得分趋势、状态变化历史、钩子强度走势、叙事线分布、紧急伏笔追踪全部上线；chapter-commit 要求 extraction_result.json 包含 YAML frontmatter（hook_type/hook_strength/strand）；新增伏笔状态同步到 state.json；审查闸门规则（修改后重审，以最后一次为准）；前端重构优化 |
+| **v6.0.0** | Story System 全链路上线（合同种子 + 运行时合同 + 章节提交 + 事件审计），补齐集成测试 |
 | **v5.5.5** | 长期记忆闭环：写前注入 + 写后沉淀，新增 `memory` 运维命令 |
 | **v5.5.4** | 写作链提示词强约束，统一中文化审查和报告文案 |
 | **v5.5.3** | 统一 `preflight` 预检命令，修复 Windows 终端编码问题 |

@@ -8,7 +8,7 @@ export async function fetchJSON(path, params = {}) {
         }
     }
 
-    const response = await fetch(url.toString())
+    const response = await fetch(url.toString(), { cache: 'no-store' })
     if (!response.ok) {
         throw new Error(await readError(response))
     }
@@ -110,6 +110,10 @@ export function fetchFilesTree() {
 
 export function fetchFileContent(path) {
     return fetchJSON('/api/files/read', { path })
+}
+
+export function writeClipboard(text) {
+    return postJSONBody('/api/clipboard/write', { text })
 }
 
 export function subscribeSSE(onMessage, handlers = {}) {

@@ -102,11 +102,71 @@ python -X utf8 "${SCRIPTS_DIR}/webnovel.py" --project-root "${PROJECT_ROOT}" rev
   --save-metrics
 ```
 
-### Step 4：NCS 复查与轻润色
+### Step 4：两阶段润色与终检
 
-加载 `../novel-station-adapter/SKILL.md`、`../webnovel-write/references/polish-guide.md`、`../webnovel-write/references/writing/typesetting.md`、`../webnovel-write/references/style-adapter.md`。
+#### 4.1 第一阶段：DeepSeek 通用去AI润色（必选）
 
-顺序：修复非 blocking issue → 调用 Novel-Control-Station-Skill 的 `polish` / authenticity pass → 风格适配 → 排版 → NCS 终检。
+加载 `../webnovel-write/references/deepseek-universal-polish.yaml`，对 Step 2 生成的章节正文执行：
+
+1. **删除 AI 痕迹**：
+   - 删除 23 条 AI 填充词（综上所述、值得注意的是等）
+   - 删除 18 种 AI 模板段落（首先其次最后、一方面另一方面等）
+   - 删除 8 种元说明（我将按照您的、故事梗概等）
+   - 删除 Markdown 格式残留
+
+2. **格式规范**：
+   - 引号统一为「」『』
+   - 省略号统一为……（U+2026×2）
+   - 破折号统一为——（U+2014×2）
+   - 数字汉字化（年份、年代、月份、日期）
+
+3. **字典替换**（排除黑名单，随机候选）：
+   - 148 条 AI 套话短语（85% 概率）
+   - 105 条通用词汇（50% 概率）
+   - 6 条小说口语短语（50% 概率）
+   - 19 条小说口语词（50% 概率）
+
+4. **LLM 语义重写**：
+   - 消除 AI 腔：被动改主动、打散模板、去过度连接、落地具体细节
+   - 增强文学质感：感官细节、角色个性对话、情绪融入景物、节奏变化
+   - 保留原意：不添加情节、不改因果、保持专有名词
+
+输出：文学化底稿（保存到 `.webnovel/tmp/polish_stage1.md`）
+
+#### 4.2 第二阶段：番茄版排版优化（必选）
+
+加载 `../webnovel-write/references/tomato-mobile-formatting.yaml`，对第一阶段输出执行：
+
+1. **对话孤立**：任何对话前后必须有双换行
+2. **文字墙粉碎**：连续 40 字无换行且遇句号，强制换行
+3. **删除冗余描写**：设定铺陈、环境描写极限压缩
+4. **删除番茄禁忌词**：拖慢节奏的毒点词汇（不知不觉间、经过漫长的等待等）
+5. **节奏提速替换**（85% 概率）：
+   - 传统过渡词 → 爆发力动作词
+   - 平淡动词 → 网文爽文动词
+6. **空白优化**：收敛过多空行为标准双换行
+7. **章末留白**：章末增加额外空行
+
+输出：番茄平台版本（写回 `正文/第{NNNN}章-{title}.md`）
+
+#### 4.3 NCS 终检与问题修复（必选）
+
+加载 `../novel-station-adapter/SKILL.md`、`../webnovel-write/references/polish-guide.md`。
+
+顺序：
+1. 修复 Step 3 审查报告中的非 blocking issue
+2. 调用 Novel-Control-Station-Skill 的 `polish` / authenticity pass
+3. 执行 Anti-AI 终检（基于 polish-guide.md 的 7 层规则）
+4. 输出 `anti_ai_force_check: pass/fail`
+
+NCS 润色默认走 safe 路线：先保留稳定底稿，只局部削高风险句型；必要时只打散最扎眼的一组段落。默认不靠额外补"人味句"来制造真人感。
+
+只改表达不改事实。`anti_ai_force_check=pass|fail` 继续作为 Step 5 的放行标记；`fail` 时不进 Step 5。
+
+**模式差异**：
+- `--minimal`：跳过 4.1 和 4.2，仅执行 4.3 排版和终检
+- `--fast`：4.1 和 4.2 正常执行，4.3 简化重写深度
+- 默认：完整执行 4.1 → 4.2 → 4.3
 
 ### Step 5：提交
 

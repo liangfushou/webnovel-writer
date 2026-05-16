@@ -1,0 +1,32 @@
+{
+  "book_info": {
+    "title": "被投票淘汰后，我成了游戏的神",
+    "author": "我可不爱上班",
+    "genre": "悬疑惊悚",
+    "platform": "番茄小说",
+    "status": "已完结"
+  },
+  "synopsis": {
+    "one_line": "10人投票淘汰赛，第一轮被投出局的我，成了操控一切的裁判",
+    "short": "赵阳用三十秒说服所有人投我出局。他说我一句话没说，最可疑。我没反驳。因为白光吞没我的时候，系统说的不是"淘汰"——是"转移"。",
+    "full": "赵阳用三十秒说服所有人投我出局。\n他说我一句话没说，最可疑。\n我没反驳。\n因为白光吞没我的时候，系统说的不是"淘汰"——是"转移"。\n现在我在他头顶，看着他的心率数据，改着下一轮的投票规则。\n他还在拼命想赢。\n他不知道，活到最后的那个人，才是祭品。"
+  },
+  "publishing": {
+    "main_category": "悬疑惊悚",
+    "sub_categories": ["男频脑洞"],
+    "use_ai": "是",
+    "tags": ["规则怪谈", "投票游戏", "身份反转", "细思极恐"]
+  },
+  "chapter_list": [
+    {"chapter": 1, "title": "投票", "words": 2175},
+    {"chapter": 2, "title": "死后", "words": 2041},
+    {"chapter": 3, "title": "第二个死人", "words": 2006},
+    {"chapter": 4, "title": "改规则", "words": 2019},
+    {"chapter": 5, "title": "他们发现了", "words": 2045},
+    {"chapter": 6, "title": "裁判的游戏", "words": 2027},
+    {"chapter": 7, "title": "淘汰裁判", "words": 2078},
+    {"chapter": 8, "title": "真相浮现", "words": 2016},
+    {"chapter": 9, "title": "最后的投票", "words": 2125},
+    {"chapter": 10, "title": "新游戏", "words": 2021}
+  ]
+}

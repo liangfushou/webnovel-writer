@@ -250,6 +250,9 @@ export default function CharactersPage() {
     const [selected, setSelected] = useState(null)
     const [changes, setChanges] = useState([])
     const [playing, setPlaying] = useState(false)
+    const [entityRefreshToken, setEntityRefreshToken] = useState(0)
+    const [isRefreshingEntities, setIsRefreshingEntities] = useState(false)
+    const [entityLoadError, setEntityLoadError] = useState('')
     const latestChapter = getLatestChapter(projectInfo)
     const [graphChapter, setGraphChapter] = useState(latestChapter)
 
@@ -259,6 +262,8 @@ export default function CharactersPage() {
 
     useEffect(() => {
         let cancelled = false
+        setIsRefreshingEntities(true)
+        setEntityLoadError('')
 
         Promise.allSettled([
             fetchEntities(),
@@ -268,9 +273,13 @@ export default function CharactersPage() {
             if (cancelled) return
 
             const entityRows = results[0].status === 'fulfilled' ? results[0].value : []
+            if (results[0].status === 'rejected') {
+                setEntityLoadError(results[0].reason?.message || '实体加载失败')
+            }
             setEntities(entityRows)
             setRelationships(results[1].status === 'fulfilled' ? results[1].value : [])
             setRelationshipEvents(results[2].status === 'fulfilled' ? results[2].value : [])
+            setIsRefreshingEntities(false)
 
             if (entityRows.length) {
                 setSelected(current => current || entityRows[0])
@@ -280,7 +289,7 @@ export default function CharactersPage() {
         return () => {
             cancelled = true
         }
-    }, [refreshToken])
+    }, [entityRefreshToken, refreshToken])
 
     useEffect(() => {
         if (!selected?.id) {
@@ -344,7 +353,19 @@ export default function CharactersPage() {
         <section className="dashboard-page">
             <header className="page-header">
                 <h2>角色图鉴</h2>
-                <Badge tone="green">{filteredEntities.length} / {entities.length} 个实体</Badge>
+                <div className="header-actions">
+                    <Badge tone={entityLoadError ? 'red' : 'green'}>
+                        {entityLoadError || `${filteredEntities.length} / ${entities.length} 个实体`}
+                    </Badge>
+                    <button
+                        type="button"
+                        className="page-btn primary-action"
+                        disabled={isRefreshingEntities}
+                        onClick={() => setEntityRefreshToken(current => current + 1)}
+                    >
+                        {isRefreshingEntities ? '刷新中' : '刷新实体'}
+                    </button>
+                </div>
             </header>
 
             <TypeFilter types={types} value={typeFilter} onChange={setTypeFilter} />

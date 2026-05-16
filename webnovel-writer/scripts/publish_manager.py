@@ -14,6 +14,7 @@
 import argparse
 import asyncio
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -46,6 +47,15 @@ class PublisherManager:
 
     async def _ensure_client(self) -> FanqieClient:
         """确保客户端已初始化"""
+        if self._client is not None:
+            try:
+                if self._browser_mgr is None or self._browser_mgr.page.is_closed():
+                    logger.warning("检测到番茄浏览器页面已关闭，正在重建发布客户端")
+                    await self.close()
+            except Exception:
+                logger.warning("检测番茄浏览器状态失败，正在重建发布客户端", exc_info=True)
+                await self.close()
+
         if self._client is None:
             if self._browser_mgr is None:
                 self._browser_mgr = BrowserManager(self.user_data_dir)
@@ -162,15 +172,28 @@ class PublisherManager:
         """清理章节内容"""
         lines = content.splitlines()
         cleaned_lines: List[str] = []
-        in_frontmatter = False
 
-        for line in lines:
-            if line.strip() == "---":
-                in_frontmatter = not in_frontmatter
-                continue
-            if in_frontmatter:
-                continue
-            cleaned_lines.append(line)
+        i = 0
+        # 只跳过文件开头的 YAML frontmatter（第一行必须是 ---）
+        if lines and lines[0].strip() == "---":
+            i = 1
+            while i < len(lines) and lines[i].strip() != "---":
+                i += 1
+            if i < len(lines):
+                i += 1  # 跳过结束的 ---
+
+        while i < len(lines):
+            cleaned_lines.append(lines[i])
+            i += 1
+
+        while cleaned_lines and not cleaned_lines[0].strip():
+            cleaned_lines.pop(0)
+
+        # 本地 Markdown 的章节标题只用于提取章节名，不能作为正文上传到番茄。
+        while cleaned_lines and re.match(r"^#\s*第\s*0*\d+\s*章\b", cleaned_lines[0].strip()):
+            cleaned_lines.pop(0)
+            while cleaned_lines and not cleaned_lines[0].strip():
+                cleaned_lines.pop(0)
 
         return "\n".join(cleaned_lines).strip()
 

@@ -1,17 +1,57 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useDashboardContext } from '../App.jsx'
 import Badge from '../components/Badge.jsx'
 import { fetchChapters, fetchJSON, postJSONBody } from '../api.js'
 import { formatChapterLabel } from '../lib/format.js'
 import { formatStatus } from '../lib/labels.js'
 
+const SELECTED_BOOK_STORAGE_KEY = 'webnovel.publish.selectedBookId'
+const CHAPTER_PAGE_SIZE_STORAGE_KEY = 'webnovel.publish.chapterPageSize'
+const CHAPTER_PAGE_SIZE_OPTIONS = [30, 50, 100]
+
 function chapterNumberFromRemoteTitle(item) {
-    const title = String(item?.title || item?.chapter_title || '')
+    const directNumber = Number(item?.chapter || item?.chapter_number || item?.chapter_no || item?.chapter_index || 0)
+    if (directNumber > 0) return directNumber
+
+    const title = String(
+        item?.title
+        || item?.chapter_title
+        || item?.item_title
+        || item?.article_title
+        || item?.item_name
+        || item?.chapter_name
+        || item?.name
+        || '',
+    )
     const match = title.match(/第\s*(\d+)\s*章/)
     return match ? Number(match[1]) : 0
 }
 
+function remoteChapterLabel(item) {
+    const source = String(item?.source || '').toLowerCase()
+    if (source === 'draft') return '已在草稿'
+    if (source === 'published') return '已发布'
+
+    const statusText = String(item?.status_desc || item?.article_status_desc || item?.verify_status_desc || '')
+    if (statusText.includes('草稿')) return '已在草稿'
+    if (statusText.includes('发布')) return '已发布'
+    return '已在平台'
+}
+
+function remoteChapterTone(item) {
+    return remoteChapterLabel(item) === '已在草稿' ? 'amber' : 'green'
+}
+
 function buildRangeSpec(chapters) {
     return [...chapters].sort((left, right) => left - right).join(',')
+}
+
+function formatUploadOrder(chapters, maxVisible = 30) {
+    const ordered = [...chapters].sort((left, right) => left - right)
+    if (!ordered.length) return ''
+    const visible = ordered.slice(0, maxVisible).map(number => `第${number}章`).join('、')
+    const hiddenCount = ordered.length - maxVisible
+    return hiddenCount > 0 ? `${visible} 等 ${ordered.length} 章` : visible
 }
 
 const BOOK_STATUS_LABELS = {
@@ -27,12 +67,12 @@ function stripHTML(value) {
 }
 
 function formatBookStatus(book) {
+    const lifecycle = BOOK_STATUS_LABELS[book?.status] || formatStatus(book?.status)
     const introTag = String(book?.book_intro?.tag || '').trim()
-    if (introTag) return introTag
     const introStatus = String(book?.book_intro?.status || '').trim()
-    if (introStatus === 'sign_audit') return '审核中'
-    const status = book?.status
-    return BOOK_STATUS_LABELS[status] || formatStatus(status)
+    const introLabel = introStatus === 'sign_audit' ? '审核中' : introTag
+    if (introLabel && lifecycle && lifecycle !== '未知') return `${lifecycle} · ${introLabel}`
+    return introLabel || lifecycle || '未知'
 }
 
 function bookStatusTone(book) {
@@ -45,6 +85,54 @@ function bookStatusTone(book) {
 
 function bookStatusTitle(book) {
     return stripHTML(book?.book_intro?.message)
+}
+
+function getBookId(book) {
+    return String(
+        book?.book_id
+        || book?.bookId
+        || book?.id
+        || book?.book_id_str
+        || book?.bookID
+        || '',
+    ).trim()
+}
+
+function getBookName(book) {
+    return book?.book_name || book?.bookName || book?.name || book?.title || '未命名'
+}
+
+function normalizeTitle(value) {
+    return String(value || '').replace(/[^\p{Script=Han}a-zA-Z0-9]/gu, '').toLowerCase()
+}
+
+function titleBigrams(value) {
+    const text = normalizeTitle(value)
+    const bigrams = []
+    for (let index = 0; index < text.length - 1; index += 1) {
+        bigrams.push(text.slice(index, index + 2))
+    }
+    return bigrams
+}
+
+function scoreBookMatch(book, projectTitle) {
+    const bookTitle = normalizeTitle(getBookName(book))
+    const localTitle = normalizeTitle(projectTitle)
+    if (!bookTitle || !localTitle) return 0
+    if (bookTitle === localTitle) return 1000
+    if (bookTitle.includes(localTitle) || localTitle.includes(bookTitle)) return 500
+    return titleBigrams(localTitle).filter(part => bookTitle.includes(part)).length
+}
+
+function findBestBookId(books, projectTitle) {
+    const scored = books
+        .map(book => ({ bookId: getBookId(book), score: scoreBookMatch(book, projectTitle) }))
+        .filter(item => item.bookId && item.score > 0)
+        .sort((left, right) => right.score - left.score)
+    if (!scored.length) return ''
+    if (scored[0].score < 2) return ''
+    if (scored[1]?.score === scored[0].score) return ''
+    return scored[0].bookId
 }
 
 function buildChapterGroups(chapters) {
@@ -72,18 +160,25 @@ function buildChapterGroups(chapters) {
 }
 
 export default function PublishPage() {
+    const { projectInfo } = useDashboardContext()
     const [status, setStatus] = useState(null)
     const [statusError, setStatusError] = useState('')
     const [setupTask, setSetupTask] = useState(null)
     const [setupRunning, setSetupRunning] = useState(false)
     const [books, setBooks] = useState([])
     const [booksLoading, setBooksLoading] = useState(false)
-    const [selectedBook, setSelectedBook] = useState('')
+    const [booksLoaded, setBooksLoaded] = useState(false)
+    const [selectedBook, setSelectedBook] = useState(() => window.localStorage.getItem(SELECTED_BOOK_STORAGE_KEY) || '')
     const [remoteChapters, setRemoteChapters] = useState([])
     const [remoteLoading, setRemoteLoading] = useState(false)
     const [localChapters, setLocalChapters] = useState([])
     const [expandedVolumes, setExpandedVolumes] = useState({})
     const [selectedChapters, setSelectedChapters] = useState(new Set())
+    const [chapterPage, setChapterPage] = useState(1)
+    const [chapterPageSize, setChapterPageSize] = useState(() => {
+        const stored = Number(window.localStorage.getItem(CHAPTER_PAGE_SIZE_STORAGE_KEY) || 30)
+        return CHAPTER_PAGE_SIZE_OPTIONS.includes(stored) ? stored : 30
+    })
     const [publishMode, setPublishMode] = useState('draft')
     const [publishing, setPublishing] = useState(false)
     const [task, setTask] = useState(null)
@@ -97,9 +192,9 @@ export default function PublishPage() {
         protagonist2: '',
     })
 
-    function showMessage(text, tone = 'green') {
+    const showMessage = useCallback((text, tone = 'green') => {
         setMessage({ text, tone })
-    }
+    }, [])
 
     function refreshStatus() {
         setStatusError('')
@@ -117,6 +212,32 @@ export default function PublishPage() {
             .catch(() => setLocalChapters([]))
     }
 
+    const refreshRemoteChapters = useCallback((bookId = selectedBook, { clearSelection = true, notifyMissing = false } = {}) => {
+        if (!bookId) {
+            setRemoteChapters([])
+            if (clearSelection) setSelectedChapters(new Set())
+            if (notifyMissing) showMessage('请先在书籍管理里选择一本番茄书籍。', 'amber')
+            return Promise.resolve([])
+        }
+
+        setRemoteLoading(true)
+        setRemoteChapters([])
+        if (clearSelection) setSelectedChapters(new Set())
+        return fetchJSON(`/api/publish/books/${encodeURIComponent(bookId)}/remote-chapters`)
+            .then(payload => {
+                const chapters = Array.isArray(payload) ? payload : []
+                setRemoteChapters(chapters)
+                showMessage(`平台章节已刷新：${chapters.length} 条`)
+                return chapters
+            })
+            .catch(error => {
+                setRemoteChapters([])
+                showMessage(`平台章节读取失败：${error.message}`, 'red')
+                return []
+            })
+            .finally(() => setRemoteLoading(false))
+    }, [selectedBook, showMessage])
+
     async function refreshBooks() {
         if (!status?.ready) {
             showMessage('发布环境还没就绪，请先按提示完成 Playwright 和番茄登录配置。', 'amber')
@@ -125,8 +246,10 @@ export default function PublishPage() {
         setBooksLoading(true)
         try {
             setBooks(await fetchJSON('/api/publish/books'))
+            setBooksLoaded(true)
             showMessage('书籍列表已刷新')
         } catch (error) {
+            setBooksLoaded(true)
             showMessage(`书籍列表读取失败：${error.message}`, 'red')
         } finally {
             setBooksLoading(false)
@@ -160,19 +283,40 @@ export default function PublishPage() {
     }, [])
 
     useEffect(() => {
-        if (!selectedBook) {
-            setRemoteChapters([])
-            setSelectedChapters(new Set())
+        if (status?.ready && !booksLoaded && !booksLoading) {
+            refreshBooks()
+        }
+    }, [status?.ready, booksLoaded, booksLoading])
+
+    useEffect(() => {
+        if (!booksLoaded) return
+        if (!books.length) {
+            setSelectedBook('')
             return
         }
-        setRemoteLoading(true)
-        setRemoteChapters([])
-        setSelectedChapters(new Set())
-        fetchJSON(`/api/publish/books/${encodeURIComponent(selectedBook)}/remote-chapters`)
-            .then(payload => setRemoteChapters(Array.isArray(payload) ? payload : []))
-            .catch(() => setRemoteChapters([]))
-            .finally(() => setRemoteLoading(false))
+        const bookIds = books.map(getBookId).filter(Boolean)
+        if (selectedBook && bookIds.includes(selectedBook)) return
+        const storedBookId = window.localStorage.getItem(SELECTED_BOOK_STORAGE_KEY) || ''
+        if (storedBookId && bookIds.includes(storedBookId)) {
+            setSelectedBook(storedBookId)
+            return
+        }
+        const projectTitle = projectInfo?.project_info?.title || projectInfo?.book_title || projectInfo?.title || ''
+        setSelectedBook(findBestBookId(books, projectTitle) || (bookIds.length === 1 ? bookIds[0] : ''))
+    }, [books, booksLoaded, selectedBook, projectInfo])
+
+    useEffect(() => {
+        if (selectedBook) {
+            window.localStorage.setItem(SELECTED_BOOK_STORAGE_KEY, selectedBook)
+        } else {
+            window.localStorage.removeItem(SELECTED_BOOK_STORAGE_KEY)
+        }
     }, [selectedBook])
+
+    useEffect(() => {
+        if (!booksLoaded) return
+        refreshRemoteChapters(selectedBook)
+    }, [booksLoaded, selectedBook, refreshRemoteChapters])
 
     useEffect(() => {
         if (!task || !['pending', 'running'].includes(task.status)) return undefined
@@ -182,6 +326,9 @@ export default function PublishPage() {
                     setTask(nextTask)
                     if (['success', 'failed'].includes(nextTask.status)) {
                         setPublishing(false)
+                        if (nextTask.status === 'success') {
+                            refreshRemoteChapters(selectedBook, { clearSelection: false })
+                        }
                     }
                 })
                 .catch(error => {
@@ -190,7 +337,7 @@ export default function PublishPage() {
                 })
         }, 1500)
         return () => window.clearInterval(timer)
-    }, [task?.task_id, task?.status])
+    }, [task?.task_id, task?.status, selectedBook, refreshRemoteChapters])
 
     useEffect(() => {
         if (!setupTask || !['pending', 'running'].includes(setupTask.status)) return undefined
@@ -211,31 +358,96 @@ export default function PublishPage() {
         return () => window.clearInterval(timer)
     }, [setupTask?.task_id, setupTask?.status])
 
-    const remoteChapterNumbers = useMemo(() => {
-        return new Set(remoteChapters.map(chapterNumberFromRemoteTitle).filter(Boolean))
+    const remoteChapterMap = useMemo(() => {
+        const map = new Map()
+        for (const chapter of remoteChapters) {
+            const number = chapterNumberFromRemoteTitle(chapter)
+            if (!number) continue
+
+            const current = map.get(number)
+            if (!current || remoteChapterLabel(current) === '已在草稿') {
+                map.set(number, chapter)
+            }
+        }
+        return map
     }, [remoteChapters])
 
-    const unpublishedChapters = useMemo(() => {
+    const remoteChapterNumbers = useMemo(() => {
+        return new Set(remoteChapterMap.keys())
+    }, [remoteChapterMap])
+
+    const selectedBookInfo = useMemo(() => {
+        return books.find(book => getBookId(book) === selectedBook) || null
+    }, [books, selectedBook])
+
+    const selectedUploadOrderText = useMemo(() => {
+        return formatUploadOrder(selectedChapters)
+    }, [selectedChapters])
+
+    const selectableChapters = useMemo(() => {
         return localChapters.filter(chapter => !remoteChapterNumbers.has(Number(chapter.chapter)))
     }, [localChapters, remoteChapterNumbers])
 
-    const chapterGroups = useMemo(() => buildChapterGroups(localChapters), [localChapters])
+    const unpublishedChapters = useMemo(() => selectableChapters, [selectableChapters])
+
+    const sortedLocalChapters = useMemo(() => {
+        return [...localChapters].sort((left, right) => Number(left.chapter || 0) - Number(right.chapter || 0))
+    }, [localChapters])
+
+    const chapterPageCount = useMemo(() => {
+        return Math.max(1, Math.ceil(sortedLocalChapters.length / chapterPageSize))
+    }, [sortedLocalChapters.length, chapterPageSize])
+
+    const safeChapterPage = Math.min(Math.max(chapterPage, 1), chapterPageCount)
+    const chapterPageStart = sortedLocalChapters.length ? (safeChapterPage - 1) * chapterPageSize + 1 : 0
+    const chapterPageEnd = Math.min(safeChapterPage * chapterPageSize, sortedLocalChapters.length)
+
+    const pagedLocalChapters = useMemo(() => {
+        const start = (safeChapterPage - 1) * chapterPageSize
+        return sortedLocalChapters.slice(start, start + chapterPageSize)
+    }, [sortedLocalChapters, safeChapterPage, chapterPageSize])
+
+    const allChapterGroups = useMemo(() => buildChapterGroups(sortedLocalChapters), [sortedLocalChapters])
+    const allChapterGroupMap = useMemo(() => {
+        return new Map(allChapterGroups.map(group => [group.key, group]))
+    }, [allChapterGroups])
+    const chapterGroups = useMemo(() => buildChapterGroups(pagedLocalChapters), [pagedLocalChapters])
+
+    useEffect(() => {
+        setChapterPage(current => Math.min(Math.max(current, 1), chapterPageCount))
+    }, [chapterPageCount])
+
+    useEffect(() => {
+        setChapterPage(1)
+    }, [chapterPageSize, localChapters.length])
+
+    useEffect(() => {
+        window.localStorage.setItem(CHAPTER_PAGE_SIZE_STORAGE_KEY, String(chapterPageSize))
+    }, [chapterPageSize])
+
+    useEffect(() => {
+        setSelectedChapters(current => {
+            const next = new Set([...current].filter(chapter => !remoteChapterNumbers.has(Number(chapter))))
+            return next.size === current.size ? current : next
+        })
+    }, [remoteChapterNumbers])
 
     function selectAll() {
-        setSelectedChapters(new Set(localChapters.map(chapter => Number(chapter.chapter)).filter(Boolean)))
+        setSelectedChapters(new Set(selectableChapters.map(chapter => Number(chapter.chapter)).filter(Boolean)))
     }
 
     function selectUnpublished() {
         setSelectedChapters(new Set(unpublishedChapters.map(chapter => Number(chapter.chapter)).filter(Boolean)))
     }
 
-    function selectVolume(group, onlyUnpublished = false) {
+    function selectVolume(group) {
+        const targetGroup = allChapterGroupMap.get(group.key) || group
         setSelectedChapters(current => {
             const next = new Set(current)
-            for (const chapter of group.chapters) {
+            for (const chapter of targetGroup.chapters) {
                 const number = Number(chapter.chapter)
                 if (!number) continue
-                if (onlyUnpublished && remoteChapterNumbers.has(number)) continue
+                if (remoteChapterNumbers.has(number)) continue
                 next.add(number)
             }
             return next
@@ -243,9 +455,10 @@ export default function PublishPage() {
     }
 
     function clearVolume(group) {
+        const targetGroup = allChapterGroupMap.get(group.key) || group
         setSelectedChapters(current => {
             const next = new Set(current)
-            for (const chapter of group.chapters) {
+            for (const chapter of targetGroup.chapters) {
                 next.delete(Number(chapter.chapter))
             }
             return next
@@ -257,6 +470,8 @@ export default function PublishPage() {
     }
 
     function toggleChapter(chapter) {
+        if (remoteChapterNumbers.has(Number(chapter))) return
+
         setSelectedChapters(current => {
             const next = new Set(current)
             if (next.has(chapter)) {
@@ -266,6 +481,21 @@ export default function PublishPage() {
             }
             return next
         })
+    }
+
+    function handleSelectBook(book) {
+        const bookId = getBookId(book)
+        const bookName = getBookName(book)
+        if (!bookId) {
+            showMessage('这条书籍数据没有可用 book_id，无法读取平台章节。', 'red')
+            return
+        }
+        setSelectedBook(bookId)
+        window.localStorage.setItem(SELECTED_BOOK_STORAGE_KEY, bookId)
+        showMessage(`已切换并保存书籍：${bookName}`)
+        if (bookId === selectedBook) {
+            refreshRemoteChapters(bookId, { clearSelection: false })
+        }
     }
 
     async function handleCreateBook() {
@@ -298,7 +528,8 @@ export default function PublishPage() {
         }
         const rangeSpec = buildRangeSpec(selectedChapters)
         const modeText = publishMode === 'publish' ? '直接发布' : '保存为草稿'
-        const confirmed = window.confirm(`将把第 ${rangeSpec} 章上传到番茄作家后台，模式：${modeText}。确认继续？`)
+        const uploadOrderText = formatUploadOrder(selectedChapters, 20)
+        const confirmed = window.confirm(`将按以下顺序上传到番茄作家后台：${uploadOrderText}。\n模式：${modeText}。\n确认继续？`)
         if (!confirmed) return
 
         setPublishing(true)
@@ -456,27 +687,30 @@ export default function PublishPage() {
                                     <tr><th>书名</th><th>书籍编号</th><th>状态</th></tr>
                                 </thead>
                                 <tbody>
-                                    {books.map(book => (
-                                        <tr
-                                            key={book.book_id}
-                                            className={selectedBook === book.book_id ? 'entity-row selected' : 'entity-row'}
-                                            onClick={() => setSelectedBook(book.book_id)}
-                                        >
-                                            <td>{book.book_name || '未命名'}</td>
-                                            <td><code>{book.book_id}</code></td>
-                                            <td>
-                                                <Badge tone={bookStatusTone(book)} title={bookStatusTitle(book)}>
-                                                    {formatBookStatus(book)}
-                                                </Badge>
-                                            </td>
-                                        </tr>
-                                    ))}
+                                    {books.map(book => {
+                                        const bookId = getBookId(book)
+                                        return (
+                                            <tr
+                                                key={bookId || getBookName(book)}
+                                                className={selectedBook === bookId ? 'entity-row selected' : 'entity-row'}
+                                                onClick={() => handleSelectBook(book)}
+                                            >
+                                                <td>{getBookName(book)}</td>
+                                                <td><code>{bookId || 'N/A'}</code></td>
+                                                <td>
+                                                    <Badge tone={bookStatusTone(book)} title={bookStatusTitle(book)}>
+                                                        {formatBookStatus(book)}
+                                                    </Badge>
+                                                </td>
+                                            </tr>
+                                        )
+                                    })}
                                 </tbody>
                             </table>
                         </div>
                     ) : (
                         <div className="empty-state compact">
-                            <p>{ready ? '刷新书单后选择番茄书籍。' : '完成发布环境配置后可读取书单。'}</p>
+                            <p>{booksLoading ? '正在读取书单…' : ready ? '刷新书单后选择番茄书籍。' : '完成发布环境配置后可读取书单。'}</p>
                         </div>
                     )}
                 </article>
@@ -497,17 +731,59 @@ export default function PublishPage() {
 
                 <div className="filter-group">
                     <button type="button" className="filter-btn" onClick={refreshLocalChapters}>刷新本地</button>
-                    <button type="button" className="filter-btn" onClick={selectAll}>全选本地</button>
+                    <button type="button" className="filter-btn" onClick={() => refreshRemoteChapters(selectedBook, { clearSelection: false, notifyMissing: true })} disabled={remoteLoading}>
+                        {remoteLoading ? '读取平台中...' : '刷新平台章节'}
+                    </button>
+                    <button type="button" className="filter-btn" onClick={selectAll}>全选可发</button>
                     <button type="button" className="filter-btn" onClick={selectUnpublished}>仅未发布</button>
                     <button type="button" className="filter-btn" onClick={() => setSelectedChapters(new Set())}>清空</button>
+                </div>
+
+                <div className="chapter-pagination">
+                    <div className="page-info">
+                        显示第 {chapterPageStart}-{chapterPageEnd} 条 / 共 {sortedLocalChapters.length} 章
+                    </div>
+                    <div className="pager-actions">
+                        <label className="form-field compact-field page-size-field">
+                            <span>每页</span>
+                            <select className="text-input" value={chapterPageSize} onChange={event => setChapterPageSize(Number(event.target.value))}>
+                                {CHAPTER_PAGE_SIZE_OPTIONS.map(size => (
+                                    <option key={size} value={size}>{size} 章</option>
+                                ))}
+                            </select>
+                        </label>
+                        <button type="button" className="filter-btn compact-filter" onClick={() => setChapterPage(page => Math.max(1, page - 1))} disabled={chapterPage <= 1}>
+                            上一页
+                        </button>
+                        <span className="page-info">第 {safeChapterPage} / {chapterPageCount} 页</span>
+                        <button type="button" className="filter-btn compact-filter" onClick={() => setChapterPage(page => Math.min(chapterPageCount, page + 1))} disabled={chapterPage >= chapterPageCount}>
+                            下一页
+                        </button>
+                    </div>
+                </div>
+
+                <div className={`dashboard-hint ${selectedBookInfo ? '' : 'notice-amber'}`.trim()}>
+                    <strong>当前绑定书籍：</strong>
+                    {selectedBookInfo ? (
+                        <>
+                            {getBookName(selectedBookInfo)}
+                            <span> · </span>
+                            <code>{selectedBook}</code>
+                            <span> · 状态 {formatBookStatus(selectedBookInfo)}</span>
+                            <span> · 平台章节 {remoteChapters.length} 条</span>
+                        </>
+                    ) : (
+                        '未绑定，请先在书籍管理中选择一本番茄书籍。'
+                    )}
                 </div>
 
                 {localChapters.length ? (
                     <div className="chapter-volume-list">
                         {chapterGroups.map(group => {
                             const isOpen = expandedVolumes[group.key] ?? true
-                            const selectedInGroup = group.chapters.filter(chapter => selectedChapters.has(Number(chapter.chapter))).length
-                            const unpublishedInGroup = group.chapters.filter(chapter => !remoteChapterNumbers.has(Number(chapter.chapter))).length
+                            const fullGroup = allChapterGroupMap.get(group.key) || group
+                            const selectedInGroup = fullGroup.chapters.filter(chapter => selectedChapters.has(Number(chapter.chapter))).length
+                            const unpublishedInGroup = fullGroup.chapters.filter(chapter => !remoteChapterNumbers.has(Number(chapter.chapter))).length
                             return (
                                 <section key={group.key} className="chapter-volume-block">
                                     <div className="chapter-volume-header">
@@ -524,8 +800,7 @@ export default function PublishPage() {
                                             <Badge tone="cyan">{group.chapters.length} 章</Badge>
                                             <Badge tone="green">已选 {selectedInGroup}</Badge>
                                             <Badge tone="blue">可发 {unpublishedInGroup}</Badge>
-                                            <button type="button" className="filter-btn compact-filter" onClick={() => selectVolume(group)}>选本卷</button>
-                                            <button type="button" className="filter-btn compact-filter" onClick={() => selectVolume(group, true)}>本卷未发</button>
+                                            <button type="button" className="filter-btn compact-filter" onClick={() => selectVolume(group)}>选本卷可发</button>
                                             <button type="button" className="filter-btn compact-filter" onClick={() => clearVolume(group)}>清本卷</button>
                                         </div>
                                     </div>
@@ -539,13 +814,16 @@ export default function PublishPage() {
                                                 <tbody>
                                                     {group.chapters.map(chapter => {
                                                         const number = Number(chapter.chapter)
-                                                        const isPublished = remoteChapterNumbers.has(number)
+                                                        const remoteChapter = remoteChapterMap.get(number)
+                                                        const isPublished = Boolean(remoteChapter)
                                                         return (
                                                             <tr key={number}>
                                                                 <td>
                                                                     <input
                                                                         type="checkbox"
                                                                         checked={selectedChapters.has(number)}
+                                                                        disabled={isPublished}
+                                                                        title={isPublished ? '平台已有该章节，避免重复上传' : ''}
                                                                         onChange={() => toggleChapter(number)}
                                                                     />
                                                                 </td>
@@ -553,8 +831,8 @@ export default function PublishPage() {
                                                                 <td>{chapter.title || '—'}</td>
                                                                 <td>{chapter.word_count ? `${chapter.word_count.toLocaleString('zh-CN')} 字` : '—'}</td>
                                                                 <td>
-                                                                    <Badge tone={isPublished ? 'green' : 'blue'}>
-                                                                        {isPublished ? '已在平台' : '可发布'}
+                                                                    <Badge tone={isPublished ? remoteChapterTone(remoteChapter) : 'blue'}>
+                                                                        {isPublished ? remoteChapterLabel(remoteChapter) : '可发布'}
                                                                     </Badge>
                                                                 </td>
                                                             </tr>
@@ -586,6 +864,14 @@ export default function PublishPage() {
                     </Badge>
                 </div>
 
+                {selectedUploadOrderText ? (
+                    <div className="dashboard-hint">
+                        <strong>实际提交顺序：</strong>
+                        <span>{selectedUploadOrderText}</span>
+                        <span> · 已按章号升序提交，和勾选先后无关。</span>
+                    </div>
+                ) : null}
+
                 <div className="action-row">
                     <label className="form-field compact-field">
                         <span>发布模式</span>
@@ -597,7 +883,7 @@ export default function PublishPage() {
                     <button
                         type="button"
                         className="page-btn primary-action"
-                        disabled={publishing || !selectedBook || selectedChapters.size === 0}
+                        disabled={publishing || remoteLoading || !selectedBook || selectedChapters.size === 0}
                         onClick={handlePublish}
                     >
                         {publishing ? '发布中...' : `发布选中章节（${selectedChapters.size}）`}

@@ -12,6 +12,7 @@ Encoding: application/x-www-form-urlencoded;charset=UTF-8
 Params: aid=2503&app_name=muye_novel
 """
 
+import asyncio
 import json
 import re
 from logger import get_logger
@@ -30,6 +31,7 @@ logger = get_logger(__name__)
 
 BASE_URL = "https://fanqienovel.com"
 _COMMON_PARAMS = "aid=2503&app_name=muye_novel"
+_DRAFT_ORDER_GAP_SECONDS = 1.1
 
 _FEMALE_GENRES = {"言情", "女频", "现代言情", "古代言情", "仙侠言情", "豪门", "穿越", "宫斗"}
 
@@ -331,6 +333,7 @@ class FanqieClient:
         volume_name: str,
         title: str,
         content: str,
+        chapter_number: int = 0,
         item_id: str = "",
     ) -> str:
         """保存章节为草稿并返回 item_id
@@ -339,6 +342,7 @@ class FanqieClient:
             title: 章节标题，如"第 1 章 替嫁之局"（5-30字符）
         """
         html_content = _text_to_html(content)
+        chapter_index = str(int(chapter_number or 0))
 
         if not item_id:
             create_form = {
@@ -348,6 +352,14 @@ class FanqieClient:
                 "volume_id": volume_id,
                 "volume_name": volume_name,
             }
+            if chapter_number:
+                create_form.update(
+                    {
+                        "index": chapter_index,
+                        "chapter_index": chapter_index,
+                        "chapter_number": chapter_index,
+                    }
+                )
             data = await self._post("/api/author/article/new_article/v0/", create_form)
             if isinstance(data, dict):
                 item_id = str(data.get("item_id", ""))
@@ -364,6 +376,14 @@ class FanqieClient:
             "volume_id": volume_id,
             "volume_name": volume_name,
         }
+        if chapter_number:
+            save_form.update(
+                {
+                    "index": chapter_index,
+                    "chapter_index": chapter_index,
+                    "chapter_number": chapter_index,
+                }
+            )
         data = await self._post("/api/author/article/cover_article/v0/", save_form)
         returned_id = item_id
         if isinstance(data, dict) and data.get("item_id"):
@@ -379,6 +399,7 @@ class FanqieClient:
         volume_name: str,
         title: str,
         content: str,
+        chapter_number: int = 0,
     ) -> str:
         """直接发布章节"""
         item_id = await self.save_draft(
@@ -387,6 +408,7 @@ class FanqieClient:
             volume_name=volume_name,
             title=title,
             content=content,
+            chapter_number=chapter_number,
         )
 
         form: Dict[str, Any] = {
@@ -397,6 +419,15 @@ class FanqieClient:
             "volume_id": volume_id,
             "volume_name": volume_name,
         }
+        if chapter_number:
+            chapter_index = str(int(chapter_number or 0))
+            form.update(
+                {
+                    "index": chapter_index,
+                    "chapter_index": chapter_index,
+                    "chapter_number": chapter_index,
+                }
+            )
 
         await self._post("/api/author/publish_article/v0/", form)
 
@@ -447,6 +478,8 @@ class FanqieClient:
         item_id: str,
         content: str,
         title: str = "",
+        volume_id: str = "",
+        volume_name: str = "",
     ) -> bool:
         """修改已发布的章节"""
         html_content = _text_to_html(content)
@@ -458,6 +491,10 @@ class FanqieClient:
         }
         if title:
             form["title"] = title
+        if volume_id:
+            form["volume_id"] = volume_id
+        if volume_name:
+            form["volume_name"] = volume_name
 
         await self._post("/api/author/publish_article/v0/", form)
         logger.info("章节已修改: item_id=%s, title=%s", item_id, title or "(不变)")
@@ -483,7 +520,12 @@ class FanqieClient:
         logger.info("开始上传 %d 章到书籍 %s", len(chapters), book_id)
 
         results: List[Dict[str, Any]] = []
-        for ch in chapters:
+        ordered_chapters = sorted(chapters, key=lambda item: int(item.get("chapter_number") or 0))
+        logger.info(
+            "上传章节顺序: %s",
+            ", ".join(str(ch.get("chapter_number", 0)) for ch in ordered_chapters),
+        )
+        for index, ch in enumerate(ordered_chapters):
             ch_number = ch.get("chapter_number", 0)
             raw_title = ch["title"]
             full_title = f"第 {ch_number} 章 {raw_title}" if ch_number > 0 else raw_title
@@ -499,12 +541,16 @@ class FanqieClient:
                         volume_name=volume_name,
                         title=full_title,
                         content=ch_content,
+                        chapter_number=int(ch_number or 0),
                     )
                     results.append({
                         "success": True,
                         "message": f"草稿已保存：{full_title}",
                         "item_id": item_id,
                     })
+                    if index < len(ordered_chapters) - 1:
+                        # 番茄草稿箱按修改时间倒序展示；间隔保存可避免同秒内第1/2章顺序漂移。
+                        await asyncio.sleep(_DRAFT_ORDER_GAP_SECONDS)
                 else:
                     item_id = await self.publish_article(
                         book_id=book_id,
@@ -512,6 +558,7 @@ class FanqieClient:
                         volume_name=volume_name,
                         title=full_title,
                         content=ch_content,
+                        chapter_number=int(ch_number or 0),
                     )
                     results.append({
                         "success": True,

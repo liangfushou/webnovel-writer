@@ -78,6 +78,7 @@ export const STRAND_COLORS = {
     quest: '#26a8ff',
     fire: '#ff5c8a',
     constellation: '#7f5af0',
+    unknown: '#8f7f5c',
 }
 
 export const FORESHADOWING_COLORS = {

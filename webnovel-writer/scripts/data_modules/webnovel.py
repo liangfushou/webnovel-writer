@@ -311,6 +311,16 @@ def main() -> None:
     p_review_pipeline.add_argument("--metrics-out", default="", help="metrics 输出文件")
     p_review_pipeline.add_argument("--report-file", default="", help="审查报告路径")
 
+    p_chapter_gate = sub.add_parser("chapter-gate", help="运行章节 AI 高频次 gate")
+    p_chapter_gate.add_argument("--chapter", type=int, default=0, help="目标章节号；默认 current_chapter + 1")
+    p_chapter_gate.add_argument("--format", choices=["text", "json"], default="text", help="输出格式")
+
+    p_chapter_loop = sub.add_parser("chapter-loop", help="自动重生 + gate 循环")
+    p_chapter_loop.add_argument("--chapter", type=int, default=0, help="目标章节号；默认 current_chapter + 1")
+    p_chapter_loop.add_argument("--max-rounds", type=int, default=3, help="最大自动重生轮数")
+    p_chapter_loop.add_argument("--no-stop-on-same-reason", action="store_true", help="同因二次失败时不要提前停机")
+    p_chapter_loop.add_argument("--format", choices=["text", "json"], default="text", help="输出格式")
+
     knowledge_parser = sub.add_parser("knowledge", help="时序知识查询")
     knowledge_sub = knowledge_parser.add_subparsers(dest="knowledge_action")
 
@@ -423,6 +433,18 @@ def main() -> None:
         if args.report_file:
             return_args.extend(["--report-file", str(args.report_file)])
         raise SystemExit(_run_script("review_pipeline.py", return_args))
+    if tool == "chapter-gate":
+        return_args = [*forward_args, "--format", str(args.format)]
+        if args.chapter:
+            return_args.extend(["--chapter", str(args.chapter)])
+        raise SystemExit(_run_script("chapter_gate.py", return_args))
+    if tool == "chapter-loop":
+        return_args = [*forward_args, "--format", str(args.format), "--max-rounds", str(args.max_rounds)]
+        if args.chapter:
+            return_args.extend(["--chapter", str(args.chapter)])
+        if args.no_stop_on_same_reason:
+            return_args.append("--no-stop-on-same-reason")
+        raise SystemExit(_run_script("chapter_loop.py", return_args))
 
     if tool == "knowledge":
         try:
