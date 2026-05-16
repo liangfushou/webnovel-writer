@@ -1,5 +1,9 @@
 .claude/
-!.claude/settings.json
+.agents/
+.codex/
+.gemini/
+.trellis/
+AGENTS.md
 
 # Python caches & virtualenv
 __pycache__/
@@ -12,8 +16,6 @@ venv/
 
 # Local runtime data
 .webnovel/
-.env
-.env.*
 
 # OS / editor
 .DS_Store
@@ -40,6 +42,7 @@ hapi-tool/
 ai-writing-knowledge/
 novel/
 novel-refined/
+oh-story-claudecode/
 
 # Local analysis snapshots and draft docs
 PROJECT_MINDMAP*.md
@@ -48,6 +51,7 @@ _v52_*.json
 _v52_*.txt
 claude_inventory.csv
 *_utf8_sample.txt
+C*tool-results*.txt
 
 # Test / diagnostic files
 test_gemini.env

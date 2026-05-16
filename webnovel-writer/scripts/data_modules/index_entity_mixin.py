@@ -18,6 +18,43 @@ logger = logging.getLogger(__name__)
 
 
 class IndexEntityMixin:
+    def _register_alias_with_cursor(
+        self, cursor: sqlite3.Cursor, alias: str, entity_id: str, entity_type: str
+    ) -> bool:
+        alias = str(alias).strip() if alias is not None else ""
+        if not alias or not entity_id:
+            return False
+
+        cursor.execute(
+            """
+            INSERT OR IGNORE INTO aliases (alias, entity_id, entity_type)
+            VALUES (?, ?, ?)
+        """,
+            (alias, entity_id, entity_type),
+        )
+        return cursor.rowcount > 0
+
+    def _register_canonical_alias(
+        self, cursor: sqlite3.Cursor, entity: EntityMeta
+    ) -> None:
+        canonical_name = str(entity.canonical_name).strip() if entity.canonical_name else ""
+        if canonical_name and canonical_name != entity.id:
+            self._register_alias_with_cursor(
+                cursor, canonical_name, entity.id, entity.type
+            )
+        if entity.is_protagonist:
+            for alias in self._protagonist_aliases(entity, canonical_name):
+                self._register_alias_with_cursor(cursor, alias, entity.id, entity.type)
+
+    def _protagonist_aliases(self, entity: EntityMeta, canonical_name: str) -> List[str]:
+        aliases = ["protagonist", "主角"]
+        compact_id = str(entity.id or "").replace("_", "").replace("-", "").strip()
+        if compact_id and compact_id != entity.id:
+            aliases.append(compact_id)
+        if canonical_name:
+            aliases.append(canonical_name)
+        return list(dict.fromkeys(alias for alias in aliases if alias and alias != entity.id))
+
     def upsert_entity(self, entity: EntityMeta, update_metadata: bool = False) -> bool:
         """
         插入或更新实体 (智能合并)
@@ -57,6 +94,7 @@ class IndexEntityMixin:
                     cursor.execute(
                         """
                         UPDATE entities SET
+                            type = ?,
                             canonical_name = ?,
                             tier = ?,
                             desc = ?,
@@ -68,6 +106,7 @@ class IndexEntityMixin:
                         WHERE id = ?
                     """,
                         (
+                            entity.type,
                             entity.canonical_name,
                             entity.tier,
                             entity.desc,
@@ -94,6 +133,7 @@ class IndexEntityMixin:
                             entity.id,
                         ),
                     )
+                self._register_canonical_alias(cursor, entity)
                 conn.commit()
                 return False
             else:
@@ -118,18 +158,38 @@ class IndexEntityMixin:
                         1 if entity.is_archived else 0,
                     ),
                 )
+                self._register_canonical_alias(cursor, entity)
                 conn.commit()
                 return True
 
     def get_entity(self, entity_id: str) -> Optional[Dict]:
-        """获取单个实体"""
+        """获取单个实体；ID 查不到时回退到别名查找。"""
         with self._get_conn() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM entities WHERE id = ?", (entity_id,))
             row = cursor.fetchone()
             if row:
                 return self._row_to_dict(row, parse_json=["current_json"])
-            return None
+
+        alias_matches = self.get_entities_by_alias(entity_id)
+        if alias_matches:
+            return alias_matches[0]
+
+        # ID 命名风格兜底：调用方传 'lu_ming' 但实体登记为 'luming' 时，
+        # 把分隔符（下划线/连字符）剥掉再试一次直接 ID 查询。
+        compact = str(entity_id or "").replace("_", "").replace("-", "").strip()
+        if compact and compact != entity_id:
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM entities WHERE id = ?", (compact,))
+                row = cursor.fetchone()
+                if row:
+                    return self._row_to_dict(row, parse_json=["current_json"])
+            alias_matches = self.get_entities_by_alias(compact)
+            if alias_matches:
+                return alias_matches[0]
+
+        return None
 
     def get_entities_by_type(
         self, entity_type: str, include_archived: bool = False
@@ -260,18 +320,18 @@ class IndexEntityMixin:
 
         同一别名可映射多个实体 (如 "天云宗" → 地点 + 势力)
         """
+        alias = str(alias).strip() if alias is not None else ""
+        if not alias or not entity_id:
+            return False
+
         with self._get_conn() as conn:
             cursor = conn.cursor()
             try:
-                cursor.execute(
-                    """
-                    INSERT OR IGNORE INTO aliases (alias, entity_id, entity_type)
-                    VALUES (?, ?, ?)
-                """,
-                    (alias, entity_id, entity_type),
+                inserted = self._register_alias_with_cursor(
+                    cursor, alias, entity_id, entity_type
                 )
                 conn.commit()
-                return cursor.rowcount > 0
+                return inserted
             except sqlite3.IntegrityError:
                 return False
 
@@ -281,6 +341,10 @@ class IndexEntityMixin:
 
         返回所有匹配的实体 (可能有多个不同类型)
         """
+        alias = str(alias).strip() if alias is not None else ""
+        if not alias:
+            return []
+
         with self._get_conn() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -289,6 +353,17 @@ class IndexEntityMixin:
                 FROM entities e
                 JOIN aliases a ON e.id = a.entity_id
                 WHERE a.alias = ?
+                ORDER BY
+                    e.is_archived ASC,
+                    e.is_protagonist DESC,
+                    CASE e.tier
+                        WHEN '核心' THEN 0
+                        WHEN '重要' THEN 1
+                        WHEN '次要' THEN 2
+                        ELSE 3
+                    END,
+                    e.last_appearance DESC,
+                    e.id ASC
             """,
                 (alias,),
             )

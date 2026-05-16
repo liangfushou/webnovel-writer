@@ -36,6 +36,19 @@ if sys.platform == "win32":
     enable_windows_utf8_stdio()
 
 
+_ASCII_LETTER_RE = re.compile(r"[A-Za-z]")
+
+
+def _validate_initial_genre_source(genre: str) -> str:
+    normalized = str(genre or "").strip()
+    if _ASCII_LETTER_RE.search(normalized):
+        raise SystemExit(
+            "题材必须使用中文名称，不能使用英文 profile key "
+            f"'{normalized}'。例如：规则怪谈、悬疑、玄幻。"
+        )
+    return normalized
+
+
 def _read_text_if_exists(path: Path) -> str:
     if not path.exists():
         return ""
@@ -109,6 +122,18 @@ def _parse_tier_map(raw: str) -> Dict[str, str]:
             key, val = part.split(":", 1)
             result[key.strip()] = val.strip()
     return result
+
+
+def _needs_protagonist_group(protagonist_structure: str) -> bool:
+    text = (protagonist_structure or "").strip()
+    return any(marker in text for marker in ("主角组", "双主角", "多主角", "群像主角"))
+
+
+def _needs_heroine_card(heroine_config: str, heroine_names: str) -> bool:
+    text = (heroine_config or "").strip().lower()
+    if text in {"无", "无女主", "none", "no heroine"}:
+        return False
+    return bool((heroine_names or "").strip() or text)
 
 
 def _render_team_rows(names: List[str], roles: List[str]) -> List[str]:
@@ -1000,7 +1025,7 @@ def _build_codex_project_doc(title: str, genre: str, now: str) -> str:
 
 
 def _inject_volume_rows(template_text: str, target_chapters: int, *, chapters_per_volume: int = 50) -> str:
-    """在总纲模板的卷表中注入卷行（若存在表头）。"""
+    """在总纲模板的卷表中只注入首卷行（后续卷由规划完成后写回）。"""
     lines = template_text.splitlines()
     header_idx = None
     for i, line in enumerate(lines):
@@ -1011,12 +1036,8 @@ def _inject_volume_rows(template_text: str, target_chapters: int, *, chapters_pe
         return template_text
 
     insert_idx = header_idx + 2 if header_idx + 1 < len(lines) else len(lines)
-    volumes = (target_chapters - 1) // chapters_per_volume + 1 if target_chapters > 0 else 1
-    rows = []
-    for v in range(1, volumes + 1):
-        start = (v - 1) * chapters_per_volume + 1
-        end = min(v * chapters_per_volume, target_chapters)
-        rows.append(f"| {v} | | 第{start}-{end}章 | | |")
+    end = min(chapters_per_volume, target_chapters) if target_chapters > 0 else chapters_per_volume
+    rows = [f"| 1 | | 第1-{end}章 | | |"]
 
     # 避免重复插入（若模板已有数据行）
     existing = {line.strip() for line in lines}
@@ -1065,6 +1086,7 @@ def init_project(
     project_path = Path(project_dir).expanduser().resolve()
     if ".claude" in project_path.parts:
         raise SystemExit("Refusing to initialize a project inside .claude. Choose a different directory.")
+    genre = _validate_initial_genre_source(genre)
     project_path.mkdir(parents=True, exist_ok=True)
 
     # 目录结构（同时兼容“卷目录”与后续扩展）
@@ -1176,15 +1198,12 @@ def init_project(
         if template_text:
             genre_templates.append(template_text.strip())
     genre_template = "\n\n---\n\n".join(genre_templates)
-    golden_finger_templates = _read_text_if_exists(templates_dir / "golden-finger-templates.md")
     output_worldview = _read_text_if_exists(output_templates_dir / "设定集-世界观.md")
     output_power = _read_text_if_exists(output_templates_dir / "设定集-力量体系.md")
     output_protagonist = _read_text_if_exists(output_templates_dir / "设定集-主角卡.md")
     output_heroine = _read_text_if_exists(output_templates_dir / "设定集-女主卡.md")
     output_team = _read_text_if_exists(output_templates_dir / "设定集-主角组.md")
-    output_golden_finger = _read_text_if_exists(output_templates_dir / "设定集-金手指.md")
     output_outline = _read_text_if_exists(output_templates_dir / "大纲-总纲.md")
-    output_fusion = _read_text_if_exists(output_templates_dir / "复合题材-融合逻辑.md")
     output_antagonist = _read_text_if_exists(output_templates_dir / "设定集-反派设计.md")
 
     # 基础文件（只在缺失时生成，避免覆盖已有内容）
@@ -1375,7 +1394,7 @@ def init_project(
     )
 
     heroine_content = output_heroine.strip() if output_heroine else ""
-    if heroine_content:
+    if heroine_content and _needs_heroine_card(heroine_config, heroine_names):
         heroine_content = _apply_label_replacements(
             heroine_content,
             {
@@ -1386,7 +1405,7 @@ def init_project(
         _write_text_if_missing(project_path / "设定集" / "女主卡.md", heroine_content)
 
     team_content = output_team.strip() if output_team else ""
-    if team_content:
+    if team_content and _needs_protagonist_group(protagonist_structure):
         names = [n.strip() for n in co_protagonists.split(",") if n.strip()] if co_protagonists else []
         roles = [r.strip() for r in co_protagonist_roles.split(",") if r.strip()] if co_protagonist_roles else []
         if names:
@@ -1406,56 +1425,6 @@ def init_project(
         _write_text_if_missing(
             project_path / "设定集" / "主角组.md",
             team_content,
-        )
-
-    golden_finger_content = output_golden_finger.strip() if output_golden_finger else ""
-    if not golden_finger_content:
-        golden_finger_content = "\n".join(
-            [
-                "# 金手指设计",
-                "",
-                f"> 项目：{title}｜题材：{genre}｜创建：{now}",
-                "",
-                "## 选型",
-                f"- 称呼：{golden_finger_name or '（待填写）'}",
-                f"- 类型：{golden_finger_type or '（待填写）'}",
-                f"- 风格：{golden_finger_style or '（待填写）'}",
-                "",
-                "## 规则（必须写清）",
-                "- 触发条件：",
-                "- 冷却/代价：",
-                "- 上限：",
-                "- 反噬/风险：",
-                "",
-                "## 成长曲线（章节规划）",
-                "- Lv1：",
-                "- Lv2：",
-                "- Lv3：",
-                "",
-                "## 模板参考（可删/可改）",
-                "",
-                (golden_finger_templates.strip() + "\n") if golden_finger_templates else "（未找到金手指模板库）\n",
-            ]
-        ).rstrip() + "\n"
-    else:
-        golden_finger_content = _apply_label_replacements(
-            golden_finger_content,
-            {
-                "类型": golden_finger_type,
-                "读者可见度": gf_visibility,
-                "不可逆代价": gf_irreversible_cost,
-            },
-        )
-    _write_text_if_missing(
-        project_path / "设定集" / "金手指设计.md",
-        golden_finger_content,
-    )
-
-    fusion_content = output_fusion.strip() if output_fusion else ""
-    if fusion_content:
-        _write_text_if_missing(
-            project_path / "设定集" / "复合题材-融合逻辑.md",
-            fusion_content,
         )
 
     antagonist_content = output_antagonist.strip() if output_antagonist else ""
@@ -1502,32 +1471,6 @@ def init_project(
     else:
         outline_content = _build_master_outline(int(target_chapters))
     _write_text_if_missing(project_path / "大纲" / "总纲.md", outline_content)
-
-    _write_text_if_missing(
-        project_path / "大纲" / "爽点规划.md",
-        "\n".join(
-            [
-                "# 爽点规划",
-                "",
-                f"> 项目：{title}｜题材：{genre}｜创建：{now}",
-                "",
-                "## 核心卖点（来自初始化输入）",
-                f"- {core_selling_points or '（待填写，建议 1-3 条，用逗号分隔）'}",
-                "",
-                "## 密度目标（建议）",
-                "- 每章至少 1 个小爽点",
-                "- 每 5 章至少 1 个大爽点",
-                "",
-                "## 分布表（示例，可改）",
-                "",
-                "| 章节范围 | 主导爽点类型 | 备注 |",
-                "|---|---|---|",
-                "| 1-5 | 金手指/打脸/反转 | 开篇钩子 + 立人设 |",
-                "| 6-10 | 升级/收获 | 进入主线节奏 |",
-                "",
-            ]
-        ),
-    )
 
     # 生成环境变量模板（不写入真实密钥）
     _write_text_if_missing(

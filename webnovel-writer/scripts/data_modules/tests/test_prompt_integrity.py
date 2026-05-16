@@ -33,8 +33,9 @@ REGISTERED_CLI_SUBCOMMANDS = {
     "where", "preflight", "use",
     "index", "state", "rag", "style", "entity", "context", "memory",
     "migrate", "status", "update-state", "backup", "archive",
-    "init", "extract-context", "memory-contract", "review-pipeline",
-    "story-system", "chapter-commit", "story-events", "ncs-bridge", "knowledge",
+    "init", "extract-context", "memory-contract", "project-memory", "review-pipeline",
+    "placeholder-scan", "master-outline-sync",
+    "story-system", "chapter-commit", "story-events", "knowledge",
 }
 
 
@@ -240,6 +241,8 @@ def test_webnovel_review_skill_uses_unified_reviewer_pipeline():
     skill_text = _read_text(SKILLS_DIR / "webnovel-review" / "SKILL.md")
 
     assert "`reviewer`" in skill_text
+    assert "Agent(" in skill_text
+    assert 'subagent_type: "webnovel-writer:reviewer"' in skill_text
     assert "review-pipeline" in skill_text
     assert ".webnovel/tmp/review_results.json" in skill_text
     assert ".webnovel/tmp/review_metrics.json" in skill_text
@@ -257,19 +260,33 @@ def test_webnovel_review_skill_uses_unified_reviewer_pipeline():
     assert " workflow " not in skill_text
 
 
-def test_webnovel_review_skill_remains_review_only_without_rewrite_step():
-    text = (SKILLS_DIR / "webnovel-review" / "SKILL.md").read_text(encoding="utf-8")
-    assert "anti-ai-rewrite" not in text
-    assert "调用 standalone anti-AI rewrite skill" not in text
+def test_active_skills_use_agent_tool_name_not_legacy_task():
+    """Claude Code 2.1.63+ 将 Task 工具改名为 Agent；active skills 不应再声明 Task。"""
+    for skill_file in SKILL_FILES:
+        text = _read_text(skill_file)
+        fm = _extract_frontmatter(text)
+        allowed_tools = fm.get("allowed-tools", "")
+        assert "Task" not in allowed_tools, f"{skill_file.parent.name}: allowed-tools 仍声明 Task"
+        assert "Task 调用" not in text, f"{skill_file.parent.name}: 仍使用软性的 Task 调用描述"
+        assert "必须通过 `Task`" not in text, f"{skill_file.parent.name}: 仍要求旧 Task 工具名"
 
 
-def test_webnovel_write_skill_routes_step4_through_ncs_bridge():
+def test_webnovel_write_skill_uses_explicit_agent_invocation_templates():
+    """webnovel-write 的关键 subagent 必须用显式 Agent(subagent_type=...) 调用模板。"""
+    text = _read_text(SKILLS_DIR / "webnovel-write" / "SKILL.md")
+    fm = _extract_frontmatter(text)
+
+    assert "Agent" in fm.get("allowed-tools", "")
+    for subagent in ("context-agent", "reviewer", "data-agent"):
+        assert f'subagent_type: "webnovel-writer:{subagent}"' in text
+        assert f'subagent_type: "{subagent}"' not in text
+    assert "不得用主流程口头代替 subagent 输出" in text
+
+
+def test_story_system_runtime_contract_commands_exist():
     text = (SKILLS_DIR / "webnovel-write" / "SKILL.md").read_text(encoding="utf-8")
     assert "story-system" in text
     assert "--emit-runtime-contracts" in text
-    assert "ncs-bridge" in text
-    assert "novel-station-adapter" in text
-    assert "anti-ai-rewrite" not in text
 
 
 def test_webnovel_write_skill_uses_chapter_commit_as_step5_mainline():
@@ -279,30 +296,11 @@ def test_webnovel_write_skill_uses_chapter_commit_as_step5_mainline():
     assert "state process-chapter" not in text
 
 
-def test_anti_ai_rewrite_skill_has_single_purpose_and_required_outputs():
-    text = (SKILLS_DIR / "anti-ai-rewrite" / "SKILL.md").read_text(encoding="utf-8")
-    assert "整章" in text
-    assert "anti_ai_force_check: pass|fail" in text
-    assert "不改剧情走向" in text
-    assert "不得把本 skill 当作 review 或 commit 的替代品。" in text
-    assert "不替代 `reviewer`" in text
-    assert "safe 路线" in text
-    assert "不为制造“人味”额外补生活回忆" in text
-
-
-def test_webnovel_write_step4_invokes_ncs_bridge_skill():
+def test_webnovel_write_skill_uses_project_root_backup_not_bare_git_add():
     text = (SKILLS_DIR / "webnovel-write" / "SKILL.md").read_text(encoding="utf-8")
-    assert "../novel-station-adapter/SKILL.md" in text
-    assert "Novel-Control-Station-Skill" in text
-    assert "NCS 是本步骤的正文生成器" in text
-    assert "anti_ai_force_check=pass|fail" in text
-    assert "NCS 润色默认走 safe 路线" in text
-
-
-def test_reference_loading_map_registers_ncs_bridge_chain():
-    text = (REFERENCES_DIR / "index" / "reference-loading-map.md").read_text(encoding="utf-8")
-    assert "| webnovel-write | Step 2/4 | always | `skills/novel-station-adapter/SKILL.md` |" in text
-    assert "| anti-ai-rewrite | 执行阶段 | always | `skills/anti-ai-rewrite/references/rewrite-rules.md` |" in text
+    assert "webnovel.py" in text
+    assert "--project-root \"${PROJECT_ROOT}\" backup" in text
+    assert "git add ." not in text
 
 
 def test_webnovel_query_skill_prefers_story_system_and_memory_contract():
@@ -328,11 +326,37 @@ def test_context_agent_loads_fixed_guides_and_outputs_writer_brief():
     assert "Context Contract" not in text
 
 
+def test_agents_do_not_name_nonexistent_writing_dna_files():
+    for filename in ("context-agent.md", "reviewer.md"):
+        text = (AGENTS_DIR / filename).read_text(encoding="utf-8")
+        assert "P20_WRITING_DNA" not in text
+        assert "WRITING_DNA.md" not in text
+        assert ".claude/rules/P20_" not in text
+
+
 def test_data_agent_is_described_as_extraction_only_not_direct_write_mainline():
     text = (AGENTS_DIR / "data-agent.md").read_text(encoding="utf-8")
     assert "chapter-commit" in text
     assert "extraction_result.json" in text
+    assert "planned_nodes" in text
+    assert "missed_nodes" in text
+    assert "pending" in text
+    assert "event_id" in text
+    assert "event_type" in text
+    assert "subject" in text
     assert "直接写入 index.db 和 state.json" not in text
+
+
+def test_webnovel_write_data_agent_prompt_requires_extraction_schema():
+    text = (SKILLS_DIR / "webnovel-write" / "SKILL.md").read_text(encoding="utf-8")
+    assert "webnovel-writer:data-agent" in text
+    assert "fulfillment_result.json 必须顶层" in text
+    assert "planned_nodes/covered_nodes/missed_nodes/extra_nodes" in text
+    assert "disambiguation_result.json 必须顶层包含 pending" in text
+    assert "extraction_result.json 必须严格" in text
+    assert "accepted_events/state_deltas/entity_deltas" in text
+    assert "禁止包在 chapter/fulfillment/disambiguation/extraction" in text
+    assert "event_id/chapter/event_type/subject/payload" in text
 
 
 def test_dashboard_and_plan_skills_surface_story_runtime_mainline():
@@ -342,25 +366,22 @@ def test_dashboard_and_plan_skills_surface_story_runtime_mainline():
     assert ".story-system/" in plan_text
 
 
-def test_webnovel_write_skill_routes_step2_through_ncs_bridge():
+def test_webnovel_write_skill_routes_step2_through_writing_brief():
     text = (SKILLS_DIR / "webnovel-write" / "SKILL.md").read_text(encoding="utf-8")
-    assert "ncs-bridge" in text
-    assert ".webnovel/tmp/ncs-bridge/" in text
-    assert "control-cards" in text
-    assert "禁止只根据临时任务书或单章提示直接起草" in text
+    assert "写作任务书" in text
+    assert "context-agent" in text
     assert "Step 0.5" not in text
     assert 'cat "${SKILL_ROOT}/../../references/shared/core-constraints.md"' not in text
     assert 'cat "${SKILL_ROOT}/references/anti-ai-guide.md"' not in text
 
 
-def test_context_agent_remains_available_but_write_skill_uses_ncs_mainline():
+def test_context_agent_and_write_skill_form_isolated_write_chain():
     context_text = (AGENTS_DIR / "context-agent.md").read_text(encoding="utf-8")
     skill_text = (SKILLS_DIR / "webnovel-write" / "SKILL.md").read_text(encoding="utf-8")
 
     assert "写作任务书" in context_text
-    assert "ncs-bridge" in skill_text
-    assert "Novel-Control-Station-Skill" in skill_text
-    assert "只根据任务书起草" not in skill_text
+    assert "写作任务书" in skill_text
+    assert "context-agent" in skill_text
     assert "Context Contract" not in context_text
     assert "Step 2 直写提示词" not in context_text
 
@@ -381,3 +402,102 @@ def test_no_direct_state_writes_in_agents():
         assert "state set-chapter-status" not in text, (
             f"{agent_file.name}: 不应直接调用 state set-chapter-status"
         )
+
+
+def test_deconstruction_agent_preserves_init_handoff_and_boundaries():
+    """reference deconstruction must remain extraction-only and init-scoped."""
+    text = _read_text(AGENTS_DIR / "deconstruction-agent.md")
+
+    assert "init_reference_research" in text
+    assert ".webnovel/tmp/reference_analyses/<safe-title>/" not in text
+    assert "不写任何文件" in text
+    assert "不得写 `_progress.md`" in text
+    assert "resume_state" in text
+    assert "tools: Read, Grep, Bash" in text
+    assert "快速模式" in text
+    assert "深度模式" in text
+    assert "黄金三章" in text
+    assert "情节点" in text
+    assert "质量门控" in text
+    assert "不得凭记忆" in text
+    assert "条件框架" in text
+    assert "情绪链条" in text
+    assert "核心梗边界" in text
+
+    for field in (
+        "reader_promise",
+        "opening_hook_patterns",
+        "cool_point_loops",
+        "protagonist_patterns",
+        "antagonist_pressure_patterns",
+        "pacing_notes",
+        "borrowable_structures",
+        "do_not_copy",
+        "differentiation_requirements",
+        "init_candidates",
+        "quality",
+        "resume_state",
+        "orphan_plot_fallback",
+        "canon_contamination_warnings",
+    ):
+        assert f'"{field}"' in text
+
+    for forbidden_path in (
+        ".story-system/",
+        "设定集/",
+        "大纲/",
+        "正文/",
+        ".webnovel/",
+    ):
+        assert forbidden_path in text
+
+    assert "不写 `idea_bank.json`" in text
+    assert "用户确认后" in text
+    assert "MIT License attribution" not in text
+
+
+def test_webnovel_init_deconstruction_wiring_keeps_confirmation_gate():
+    """init may consume only confirmed, transformed reference patterns."""
+    text = _read_text(SKILLS_DIR / "webnovel-init" / "SKILL.md")
+
+    assert 'subagent_type: "webnovel-writer:deconstruction-agent"' in text
+    assert "Step 1.5：灵感来源询问" in text
+    assert "进入故事核采集前" in text
+    assert "不要默认拆书" in text
+    assert "你这本书的灵感来源想从哪里开始" in text
+    assert "init_reference_research" in text
+    assert "init_reference_research JSON 对象" in text
+    assert ".webnovel/tmp/reference_analyses/<safe-title>/" not in text
+    assert "project_root=${PROJECT_ROOT" not in text
+    assert "不写任何文件" in text
+    assert "不得由 init 主流程口头替代拆解结果" in text
+    assert "`quality`" in text
+    assert "`quality.passed=false`" in text
+    assert "`confidence < 0.85`" in text
+
+    for handoff_field in (
+        "reader_promise",
+        "opening_hook_patterns",
+        "cool_point_loops",
+        "protagonist_patterns",
+        "antagonist_pressure_patterns",
+        "pacing_notes",
+        "borrowable_structures",
+        "differentiation_requirements",
+        "init_candidates",
+    ):
+        assert handoff_field in text
+
+    for forbidden_path in (
+        "idea_bank.json",
+        ".story-system",
+        "设定集",
+        "大纲",
+        "正文",
+        ".webnovel/state.json",
+    ):
+        assert forbidden_path in text
+
+    assert "用户确认前" in text
+    assert "Step 2-6 只能使用用户确认过、并已变形为本书差异化表达的模式" in text
+    assert "汇总 Step 1.5 已确认的灵感来源" in text

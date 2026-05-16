@@ -172,7 +172,7 @@ def test_process_chapter_result_and_sqlite_sync(temp_project):
 
     result = {
         "entities_appeared": [
-            {"id": "xiaoyan", "type": "角色", "mentions": ["萧炎"], "confidence": 0.9}
+            {"id": "xiaoyan", "type": "角色", "mentions": ["萧炎", "小炎子"], "confidence": 0.9}
         ],
         "entities_new": [
             {
@@ -216,6 +216,9 @@ def test_process_chapter_result_and_sqlite_sync(temp_project):
 
     idx = IndexManager(temp_project)
     assert idx.get_entity("yaolao") is not None
+    assert idx.get_entity("药老")["id"] == "yaolao"
+    assert idx.get_entity("小炎子")["id"] == "xiaoyan"
+    assert "药老先生" in idx.get_entity_aliases("yaolao")
     assert idx.get_relationship_between("xiaoyan", "yaolao")
     assert idx.get_entity_state_changes("xiaoyan")
 
@@ -558,6 +561,11 @@ def test_state_manager_cli_commands(temp_project, monkeypatch, capsys):
 
 
 def test_state_manager_cli_rejects_invalid_project_root(monkeypatch, tmp_path, capsys):
+    monkeypatch.delenv("WEBNOVEL_PROJECT_ROOT", raising=False)
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    monkeypatch.setenv("WEBNOVEL_CLAUDE_HOME", str(tmp_path / "empty-claude-home"))
+
+    (tmp_path / ".git").mkdir(parents=True, exist_ok=True)
     invalid_root = tmp_path / "not-a-project"
     invalid_root.mkdir(parents=True, exist_ok=True)
 

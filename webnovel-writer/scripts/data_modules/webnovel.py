@@ -77,6 +77,42 @@ def _strip_project_root_args(argv: list[str]) -> list[str]:
     return out
 
 
+PASSTHROUGH_TOOLS = {
+    "index",
+    "state",
+    "rag",
+    "style",
+    "entity",
+    "context",
+    "memory",
+    "migrate",
+    "status",
+    "update-state",
+    "backup",
+    "archive",
+    "init",
+    "story-system",
+    "memory-contract",
+    "project-memory",
+}
+
+
+def _passthrough_tail(argv: list[str], tool: str) -> list[str]:
+    i = 0
+    while i < len(argv):
+        token = argv[i]
+        if token == "--project-root":
+            i += 2
+            continue
+        if token.startswith("--project-root="):
+            i += 1
+            continue
+        if token == tool:
+            return list(argv[i + 1 :])
+        i += 1
+    return []
+
+
 def _run_data_module(module: str, argv: list[str]) -> int:
     """
     Import `data_modules.<module>` and call its main(), while isolating sys.argv.
@@ -112,9 +148,29 @@ def _run_script(script_name: str, argv: list[str]) -> int:
 
 
 def cmd_where(args: argparse.Namespace) -> int:
-    root = _resolve_root(args.project_root)
+    try:
+        root = _resolve_root(args.project_root)
+    except FileNotFoundError as exc:
+        print(_project_root_diagnostic(args.project_root, exc), file=sys.stderr)
+        return 1
     print(str(root))
     return 0
+
+
+def _project_root_diagnostic(
+    explicit_project_root: Optional[str], exc: FileNotFoundError
+) -> str:
+    if explicit_project_root:
+        return (
+            "未找到有效书项目根目录（需要包含 .webnovel/state.json）: "
+            f"{explicit_project_root}\n"
+            f"detail: {exc}"
+        )
+    return (
+        "当前工作区还没有激活的书项目（未找到 .webnovel/state.json）。\n"
+        "请先运行 webnovel init 创建项目，或运行 webnovel use <project_root> 绑定已有书项目。\n"
+        f"detail: {exc}"
+    )
 
 
 def _build_preflight_report(explicit_project_root: Optional[str]) -> dict:
@@ -139,6 +195,16 @@ def _build_preflight_report(explicit_project_root: Optional[str]) -> dict:
         project_root = str(resolved_root)
         checks.append({"name": "project_root", "ok": True, "path": project_root})
         story_runtime = build_story_runtime_health(resolved_root)
+    except FileNotFoundError as exc:
+        project_root_error = _project_root_diagnostic(explicit_project_root, exc)
+        checks.append(
+            {
+                "name": "project_root",
+                "ok": False,
+                "path": explicit_project_root or "",
+                "error": project_root_error,
+            }
+        )
     except Exception as exc:
         project_root_error = str(exc)
         checks.append({"name": "project_root", "ok": False, "path": explicit_project_root or "", "error": project_root_error})
@@ -305,11 +371,23 @@ def main() -> None:
     p_memory_contract = sub.add_parser("memory-contract", help="转发到 memory_cli.py")
     p_memory_contract.add_argument("args", nargs=argparse.REMAINDER)
 
+    p_project_memory = sub.add_parser("project-memory", help="转发到 project_memory.py")
+    p_project_memory.add_argument("args", nargs=argparse.REMAINDER)
+
     p_review_pipeline = sub.add_parser("review-pipeline", help="转发到 review_pipeline.py")
     p_review_pipeline.add_argument("--chapter", type=int, required=True, help="目标章节号")
     p_review_pipeline.add_argument("--review-results", required=True, help="reviewer 原始结果 JSON 文件")
     p_review_pipeline.add_argument("--metrics-out", default="", help="metrics 输出文件")
     p_review_pipeline.add_argument("--report-file", default="", help="审查报告路径")
+    p_review_pipeline.add_argument("--save-metrics", action="store_true", help="直接写入 index.db")
+
+    p_placeholder_scan = sub.add_parser("placeholder-scan", help="扫描大纲/设定集未补齐占位")
+    p_placeholder_scan.add_argument("--format", choices=["json", "text"], default="json", help="输出格式")
+
+    p_master_outline_sync = sub.add_parser("master-outline-sync", help="当前卷规划完成后写回 V+1 最小总纲锚点")
+    p_master_outline_sync.add_argument("--volume", type=int, required=True, help="当前已完成规划的卷号")
+    p_master_outline_sync.add_argument("--writeback-file", default="", help="显式结构化写回 JSON")
+    p_master_outline_sync.add_argument("--format", choices=["json", "text"], default="json", help="输出格式")
 
     p_chapter_gate = sub.add_parser("chapter-gate", help="运行章节 AI 高频次 gate")
     p_chapter_gate.add_argument("--chapter", type=int, default=0, help="目标章节号；默认 current_chapter + 1")
@@ -339,15 +417,20 @@ def main() -> None:
         from data_modules.cli_args import normalize_global_project_root
 
     argv = normalize_global_project_root(sys.argv[1:])
-    args = parser.parse_args(argv)
+    args, unknown_args = parser.parse_known_args(argv)
 
     # where/use 直接执行
     if hasattr(args, "func"):
+        if unknown_args:
+            parser.error(f"unrecognized arguments: {' '.join(unknown_args)}")
         code = int(args.func(args) or 0)
         raise SystemExit(code)
 
     tool = args.tool
-    rest = list(getattr(args, "args", []) or [])
+    if unknown_args and tool not in PASSTHROUGH_TOOLS:
+        parser.error(f"unrecognized arguments: {' '.join(unknown_args)}")
+
+    rest = _passthrough_tail(argv, tool) if tool in PASSTHROUGH_TOOLS else list(getattr(args, "args", []) or [])
     # argparse.REMAINDER 可能以 `--` 开头占位，这里去掉
     if rest[:1] == ["--"]:
         rest = rest[1:]
@@ -422,6 +505,8 @@ def main() -> None:
         raise SystemExit(_run_script("chapter_commit.py", return_args))
     if tool == "memory-contract":
         raise SystemExit(_run_script("memory_cli.py", [*forward_args, *rest]))
+    if tool == "project-memory":
+        raise SystemExit(_run_script("project_memory.py", [*forward_args, *rest]))
     if tool == "review-pipeline":
         return_args = [
             *forward_args,
@@ -432,6 +517,8 @@ def main() -> None:
             return_args.extend(["--metrics-out", str(args.metrics_out)])
         if args.report_file:
             return_args.extend(["--report-file", str(args.report_file)])
+        if args.save_metrics:
+            return_args.append("--save-metrics")
         raise SystemExit(_run_script("review_pipeline.py", return_args))
     if tool == "chapter-gate":
         return_args = [*forward_args, "--format", str(args.format)]
@@ -445,6 +532,13 @@ def main() -> None:
         if args.no_stop_on_same_reason:
             return_args.append("--no-stop-on-same-reason")
         raise SystemExit(_run_script("chapter_loop.py", return_args))
+    if tool == "placeholder-scan":
+        raise SystemExit(_run_data_module("placeholder_scanner", [*forward_args, "--format", str(args.format)]))
+    if tool == "master-outline-sync":
+        return_args = [*forward_args, "--volume", str(args.volume), "--format", str(args.format)]
+        if args.writeback_file:
+            return_args.extend(["--writeback-file", str(args.writeback_file)])
+        raise SystemExit(_run_script("update_master_outline.py", return_args))
 
     if tool == "knowledge":
         try:

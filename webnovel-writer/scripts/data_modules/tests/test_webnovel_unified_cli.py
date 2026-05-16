@@ -95,6 +95,54 @@ def test_extract_context_forwards_with_resolved_project_root(monkeypatch, tmp_pa
     ]
 
 
+def test_backup_forwards_resolved_book_root_from_parent_workspace(monkeypatch, tmp_path):
+    module = _load_webnovel_module()
+
+    workspace_root = (tmp_path / "workspace").resolve()
+    book_root = (workspace_root / "book").resolve()
+    (workspace_root / ".git").mkdir(parents=True, exist_ok=True)
+    (book_root / ".git").mkdir(parents=True, exist_ok=True)
+    (book_root / ".webnovel").mkdir(parents=True, exist_ok=True)
+    (book_root / ".webnovel" / "state.json").write_text("{}", encoding="utf-8")
+    called = {}
+
+    def _fake_run_script(script_name, argv):
+        called["script_name"] = script_name
+        called["argv"] = list(argv)
+        return 0
+
+    monkeypatch.chdir(workspace_root)
+    monkeypatch.setattr(module, "_run_script", _fake_run_script)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "webnovel",
+            "--project-root",
+            str(workspace_root),
+            "backup",
+            "--chapter",
+            "2",
+            "--chapter-title",
+            "第二章",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        module.main()
+
+    assert int(exc.value.code or 0) == 0
+    assert called["script_name"] == "backup_manager.py"
+    assert called["argv"] == [
+        "--project-root",
+        str(book_root),
+        "--chapter",
+        "2",
+        "--chapter-title",
+        "第二章",
+    ]
+
+
 def test_webnovel_story_system_forwards_with_resolved_project_root(monkeypatch, tmp_path):
     module = _load_webnovel_module()
 
@@ -324,6 +372,50 @@ def test_preflight_includes_story_runtime_health(monkeypatch, tmp_path, capsys):
     assert '"mainline_ready"' in captured.out
 
 
+def test_where_reports_empty_workspace_without_traceback(monkeypatch, tmp_path, capsys):
+    module = _load_webnovel_module()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    (workspace / ".git").mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.chdir(workspace)
+    monkeypatch.delenv("WEBNOVEL_PROJECT_ROOT", raising=False)
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    monkeypatch.setenv("WEBNOVEL_CLAUDE_HOME", str(tmp_path / "empty-claude-home"))
+    monkeypatch.setattr(sys, "argv", ["webnovel", "where"])
+
+    with pytest.raises(SystemExit) as exc:
+        module.main()
+
+    captured = capsys.readouterr()
+    assert int(exc.value.code or 0) == 1
+    assert "还没有激活的书项目" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_preflight_reports_empty_workspace_without_traceback(monkeypatch, tmp_path, capsys):
+    module = _load_webnovel_module()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    (workspace / ".git").mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.chdir(workspace)
+    monkeypatch.delenv("WEBNOVEL_PROJECT_ROOT", raising=False)
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    monkeypatch.setenv("WEBNOVEL_CLAUDE_HOME", str(tmp_path / "empty-claude-home"))
+    monkeypatch.setattr(sys, "argv", ["webnovel", "preflight", "--format", "json"])
+
+    with pytest.raises(SystemExit) as exc:
+        module.main()
+
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+    assert int(exc.value.code or 0) == 1
+    assert report["ok"] is False
+    assert "还没有激活的书项目" in report["project_root_error"]
+    assert "Traceback" not in captured.err
+
+
 def test_quality_trend_report_writes_to_book_root_when_input_is_workspace_root(tmp_path, monkeypatch):
     _ensure_scripts_on_path()
     import quality_trend_report as quality_trend_report_module
@@ -455,6 +547,7 @@ def test_review_pipeline_forwards_with_resolved_project_root(monkeypatch, tmp_pa
             str(tmp_path / "metrics.json"),
             "--report-file",
             "审查报告/第18章.md",
+            "--save-metrics",
         ],
     )
 
@@ -474,7 +567,86 @@ def test_review_pipeline_forwards_with_resolved_project_root(monkeypatch, tmp_pa
         str(tmp_path / "metrics.json"),
         "--report-file",
         "审查报告/第18章.md",
+        "--save-metrics",
     ]
+
+
+def test_project_memory_forwards_with_resolved_project_root(monkeypatch, tmp_path):
+    module = _load_webnovel_module()
+
+    book_root = (tmp_path / "book").resolve()
+    called = {}
+
+    def _fake_resolve(explicit_project_root=None):
+        return book_root
+
+    def _fake_run_script(script_name, argv):
+        called["script_name"] = script_name
+        called["argv"] = list(argv)
+        return 0
+
+    monkeypatch.setattr(module, "_resolve_root", _fake_resolve)
+    monkeypatch.setattr(module, "_run_script", _fake_run_script)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "webnovel",
+            "--project-root",
+            str(tmp_path),
+            "project-memory",
+            "add-pattern",
+            "--pattern-type",
+            "format",
+            "--description",
+            '内心独白使用双引号""',
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        module.main()
+
+    assert int(exc.value.code or 0) == 0
+    assert called["script_name"] == "project_memory.py"
+    assert called["argv"] == [
+        "--project-root",
+        str(book_root),
+        "add-pattern",
+        "--pattern-type",
+        "format",
+        "--description",
+        '内心独白使用双引号""',
+    ]
+
+
+def test_project_memory_add_pattern_escapes_quotes(tmp_path):
+    _ensure_scripts_on_path()
+    import project_memory as project_memory_module
+
+    project_root = (tmp_path / "book").resolve()
+    (project_root / ".webnovel").mkdir(parents=True, exist_ok=True)
+    (project_root / ".webnovel" / "state.json").write_text(
+        json.dumps({"progress": {"current_chapter": 3}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    description = "正文格式规范：内心独白使用双引号\"\"，系统界面保留方括号[]"
+    result = project_memory_module.add_pattern(
+        project_root,
+        pattern_type="format",
+        description=description,
+        category="写作规范",
+        importance="high",
+    )
+
+    memory_path = project_root / ".webnovel" / "project_memory.json"
+    raw_text = memory_path.read_text(encoding="utf-8")
+    payload = json.loads(raw_text)
+
+    assert result["status"] == "success"
+    assert '\\"\\"' in raw_text
+    assert payload["patterns"][0]["description"] == description
+    assert payload["patterns"][0]["source_chapter"] == 3
 
 
 def test_review_pipeline_main_creates_output_directories(tmp_path):
@@ -505,6 +677,7 @@ def test_review_pipeline_main_creates_output_directories(tmp_path):
     )
 
     metrics_out = project_root / ".webnovel" / "tmp" / "review" / "metrics.json"
+    report_file = project_root / "审查报告" / "第9章审查报告.md"
 
     old_argv = sys.argv
     sys.argv = [
@@ -517,6 +690,9 @@ def test_review_pipeline_main_creates_output_directories(tmp_path):
         str(review_results_path),
         "--metrics-out",
         str(metrics_out),
+        "--report-file",
+        "审查报告/第9章审查报告.md",
+        "--save-metrics",
     ]
     try:
         review_pipeline_module.main()
@@ -524,6 +700,19 @@ def test_review_pipeline_main_creates_output_directories(tmp_path):
         sys.argv = old_argv
 
     assert metrics_out.is_file()
+    assert report_file.is_file()
+    report_text = report_file.read_text(encoding="utf-8")
+    assert "# 第9章审查报告" in report_text
+    assert "小问题" in report_text
+    assert "## 其他问题" in report_text
+
+    import sqlite3
+
+    with sqlite3.connect(project_root / ".webnovel" / "index.db") as conn:
+        row = conn.execute(
+            "SELECT start_chapter, end_chapter, report_file FROM review_metrics"
+        ).fetchone()
+    assert row == (9, 9, "审查报告/第9章审查报告.md")
 
 
 def test_webnovel_skill_flow_runs_story_contract_context_and_review_pipeline_with_stubbed_vector_model(
